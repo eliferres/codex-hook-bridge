@@ -70,6 +70,22 @@ class Merging(unittest.TestCase):
             load_routes([path])
         self.assertIn("bad.json is not valid JSON", str(caught.exception))
 
+    def test_a_malformed_hooks_value_is_an_error_not_silence(self) -> None:
+        cases = [
+            {"hooks": "exit 2"},
+            {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": "exit 2"}]}},
+            {"hooks": {"PreToolUse": ["exit 2"]}},
+            {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": ["exit 2"]}]}},
+            {"hooks": {"PreToolUse": [{"matcher": 5, "hooks": []}]}},
+        ]
+        for i, data in enumerate(cases):
+            with self.subTest(data=data):
+                path = write(os.path.join(self.tmp.name, "m%d.json" % i), data)
+                with self.assertRaises(SettingsError) as caught:
+                    load_routes([path])
+                self.assertIn("m%d.json" % i, str(caught.exception))
+                self.assertEqual(len(str(caught.exception).splitlines()), 1)
+
     def test_a_group_without_a_matcher_matches_with_an_empty_string(self) -> None:
         path = write(os.path.join(self.tmp.name, "s.json"),
                      {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}})

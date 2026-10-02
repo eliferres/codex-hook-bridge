@@ -76,13 +76,22 @@ def load_routes(explicit: Optional[List[str]] = None, project_dir: str = ".") ->
         for event, groups in data.get("hooks", {}).items():
             if not isinstance(groups, list):
                 raise SettingsError("%s: hooks.%s is not a list" % (path, event))
-            for group in groups:
+            # A malformed entry is an error, never skipped: a guard that is
+            # silently dropped is a guard that silently allows.
+            for n, group in enumerate(groups):
+                where = "%s: hooks.%s[%d]" % (path, event, n)
                 if not isinstance(group, dict):
-                    continue
+                    raise SettingsError("%s is not an object" % where)
                 matcher = group.get("matcher") or ""
-                for handler in group.get("hooks") or []:
-                    if isinstance(handler, dict):
-                        routes.append(Route(event, str(matcher), handler, path))
+                if not isinstance(matcher, str):
+                    raise SettingsError("%s.matcher is not a string" % where)
+                handlers = group.get("hooks") or []
+                if not isinstance(handlers, list):
+                    raise SettingsError("%s.hooks is not a list" % where)
+                for handler in handlers:
+                    if not isinstance(handler, dict):
+                        raise SettingsError("%s.hooks has an entry that is not an object" % where)
+                    routes.append(Route(event, matcher, handler, path))
     return [] if disabled else routes
 
 

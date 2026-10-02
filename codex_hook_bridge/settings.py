@@ -57,8 +57,8 @@ def load_routes(explicit: Optional[List[str]] = None, project_dir: str = ".") ->
     """Every hook route across the settings files, in file order then file position.
 
     Explicit files must exist. Default files are read when present and skipped
-    when absent, as Claude Code does. `disableAllHooks: true` in any file
-    switches every route off.
+    when absent, as Claude Code does. `disableAllHooks` takes its value from
+    the highest-precedence file that sets it; true switches every route off.
     """
     if explicit:
         files = [(path, True) for path in explicit]
@@ -70,7 +70,8 @@ def load_routes(explicit: Optional[List[str]] = None, project_dir: str = ".") ->
         if not required and not os.path.exists(path):
             continue
         data = _load(path)
-        disabled = disabled or data.get("disableAllHooks") is True
+        if isinstance(data.get("disableAllHooks"), bool):
+            disabled = data["disableAllHooks"]   # later files take precedence, as in Claude Code
         for event, groups in data.get("hooks", {}).items():
             if not isinstance(groups, list):
                 raise SettingsError("%s: hooks.%s is not a list" % (path, event))

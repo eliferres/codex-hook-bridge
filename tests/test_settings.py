@@ -48,10 +48,16 @@ class Merging(unittest.TestCase):
     def test_the_user_file_follows_claude_config_dir(self) -> None:
         self.assertEqual(default_files("/p")[0], os.path.join(self.user, "settings.json"))
 
-    def test_disable_all_hooks_in_any_file_switches_every_route_off(self) -> None:
+    def test_disable_all_hooks_true_in_the_local_file_switches_every_route_off(self) -> None:
         write(os.path.join(self.user, "settings.json"), hooks("PreToolUse", "Bash", "user.sh"))
         write(os.path.join(self.project, ".claude", "settings.local.json"), {"disableAllHooks": True})
         self.assertEqual(load_routes(None, self.project), [])
+
+    def test_a_project_false_overrides_a_user_true_for_disable_all_hooks(self) -> None:
+        write(os.path.join(self.user, "settings.json"),
+              dict(hooks("PreToolUse", "Bash", "user.sh"), disableAllHooks=True))
+        write(os.path.join(self.project, ".claude", "settings.json"), {"disableAllHooks": False})
+        self.assertEqual([r.handler["command"] for r in load_routes(None, self.project)], ["user.sh"])
 
     def test_an_explicit_file_that_is_missing_is_an_error(self) -> None:
         with self.assertRaises(SettingsError) as caught:

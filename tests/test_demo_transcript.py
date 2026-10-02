@@ -90,8 +90,10 @@ class DemoTranscript(unittest.TestCase):
                                  % (i, got["status"], want["status"]))
 
     def test_the_session_never_shows_a_machine_path(self) -> None:
+        temp = tempfile.gettempdir()
+        markers = {os.path.expanduser("~"), temp, os.path.realpath(temp)}
         for entry in self.recorded:
-            for marker in ("/Users/", "/home/", "/private/var/", "/var/folders/", "/tmp/tmp"):
+            for marker in markers:
                 self.assertNotIn(marker, entry["out"])
 
     def test_the_picture_draws_the_transcript_in_order_and_nothing_else(self) -> None:

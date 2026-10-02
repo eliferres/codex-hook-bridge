@@ -1,0 +1,35 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Run the demo payloads through the bridge
+        run: |
+          python -m codex_hook_bridge translate < demo/payloads/patch.json
+          python -m codex_hook_bridge hook --settings demo/settings.json < demo/payloads/patch.json && code=0 || code=$?
+          [ "$code" = 2 ] || { echo "the .env patch exited $code, expected 2"; exit 1; }
+          python -m codex_hook_bridge hook --settings demo/settings.json < demo/payloads/publish.json && code=0 || code=$?
+          [ "$code" = 2 ] || { echo "the publish command exited $code, expected 2"; exit 1; }
+          python -m codex_hook_bridge parity --settings demo/settings.json && code=0 || code=$?
+          [ "$code" = 1 ] || { echo "parity exited $code, expected 1"; exit 1; }
+      - name: Install and run the console script
+        run: |
+          python -m pip install .
+          codex-hook-bridge --version
+          codex-hook-bridge translate < demo/payloads/patch.json

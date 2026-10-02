@@ -84,7 +84,7 @@ class Report(unittest.TestCase):
             "             via Bash",
             "UNACCOUNTED  PreToolUse [Deploy]: d.sh",
             "             matches no tool a Codex call is translated to",
-            "2 routes: 1 reached, 1 unaccounted",
+            "2 routes: 1 reached, 1 unaccounted (managed-policy and plugin hooks are not read)",
         ])
 
     def test_the_command_exits_1_on_an_unaccounted_route_and_0_once_accepted(self) -> None:
@@ -96,7 +96,10 @@ class Report(unittest.TestCase):
             base = [sys.executable, "-m", "codex_hook_bridge", "parity", "--settings", settings]
             proc = subprocess.run(base + ["--json"], capture_output=True, text=True, cwd=ROOT)
             self.assertEqual(proc.returncode, 1)
-            self.assertFalse(json.loads(proc.stdout)["ok"])
+            report = json.loads(proc.stdout)
+            self.assertFalse(report["ok"])
+            self.assertEqual(report["not_read"], ["managed policy settings", "plugin hooks",
+                                                  "skill and subagent frontmatter hooks"])
             accept = os.path.join(tmp, "accept.json")
             with open(accept, "w") as fh:
                 json.dump([{"event": "PreToolUse", "matcher": "Deploy", "command": "d.sh", "reason": "ours"}], fh)

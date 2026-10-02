@@ -21,8 +21,9 @@ codex-hook-bridge parity
 
 `parity` reads the same settings files Claude Code reads in the current
 directory (`~/.claude/settings.json`, `.claude/settings.json`,
-`.claude/settings.local.json`) and tells you which of your hooks a Codex
-session can reach. It is not on PyPI; install from the repository as above.
+`.claude/settings.local.json`) and tells you which of those hooks a Codex
+session can reach. Hooks from managed policy settings and plugins are not
+read; see Limitations. It is not on PyPI; install from the repository as above.
 
 To try it on the demo instead, clone and run it from the checkout:
 
@@ -203,6 +204,10 @@ usage is mapped so input plus cache read equals Codex's own input count.
   hook an encrypted or empty `spawn_agent` message, `Agent` hooks receive
   that text as `prompt`; a hook that checks briefs should treat an
   unreadable one as its own decision to make.
+- **Settings files only.** Claude Code also runs hooks from managed policy
+  settings, enabled plugins and skill or subagent frontmatter. The bridge
+  reads none of those, so they neither run under Codex nor appear in
+  `parity`, which says so on its last line.
 - **Only `command` hooks run.** `http`, `mcp_tool`, `prompt` and `agent`
   handlers are skipped, and `parity` says so. The handler-level `if` field is
   not evaluated, so a hook narrowed with `if` runs on every call its matcher

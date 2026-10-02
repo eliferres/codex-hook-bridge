@@ -61,6 +61,9 @@ CLAUDE_ONLY_TOOLS: Dict[str, str] = {
     "Workflow": "Codex has no workflow tool",
 }
 
+# Hook sources Claude Code also runs that the bridge does not read.
+NOT_READ = ["managed policy settings", "plugin hooks", "skill and subagent frontmatter hooks"]
+
 REACHED, UNREACHABLE, ACCEPTED, UNACCOUNTED = "reached", "unreachable", "accepted", "unaccounted"
 STALE, GONE = "stale-acceptance", "gone"
 
@@ -168,9 +171,11 @@ def render(findings: List[Finding]) -> str:
     order = (REACHED, UNREACHABLE, ACCEPTED, UNACCOUNTED, STALE, GONE)
     summary = ", ".join("%d %s" % (counts[s], s) for s in order if s in counts)
     total = sum(f.status != GONE for f in findings)
-    lines.append("%d route%s: %s" % (total, "" if total == 1 else "s", summary or "none"))
+    lines.append("%d route%s: %s (managed-policy and plugin hooks are not read)"
+                 % (total, "" if total == 1 else "s", summary or "none"))
     return "\n".join(lines)
 
 
 def as_json(findings: List[Finding]) -> str:
-    return json.dumps({"routes": [f._asdict() for f in findings], "ok": not failed(findings)}, indent=2)
+    return json.dumps({"routes": [f._asdict() for f in findings], "ok": not failed(findings),
+                       "not_read": NOT_READ}, indent=2)

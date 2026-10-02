@@ -42,6 +42,6 @@
   <text x="24" y="716" class="dim">             matches no tool a Codex call is translated to</text>
   <text x="24" y="744" class="dim">unreachable  Notification: python3 demo/hooks/notify.py</text>
   <text x="24" y="772" class="dim">             Codex fires no notification event</text>
-  <text x="24" y="800" class="dim">5 routes: 2 reached, 2 unreachable, 1 unaccounted</text>
+  <text x="24" y="800" class="dim">5 routes: 2 reached, 2 unreachable, 1 unaccounted (managed-…</text>
   <text x="24" y="828" class="bad">exit 1</text>
 </svg>

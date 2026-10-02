@@ -3,8 +3,9 @@
 Claude Code merges hooks across its settings files rather than letting one
 file replace another: the user file, the project's shared file and the
 project's local file each add their routes. The same reading applies here,
-with the same default locations, so the bridge runs exactly the hooks Claude
-Code would run in that project.
+with the same default locations. Claude Code also runs hooks from managed
+policy settings, plugins, and skill or subagent frontmatter; those are not
+read here.
 """
 from __future__ import annotations
 

@@ -27,6 +27,8 @@ if mode == "ask":
                                              "permissionDecisionReason": "ask from %s" % tag}}))
 if mode == "block":
     print(json.dumps({"decision": "block", "reason": "blocked by %s" % tag}))
+if mode == "halt":
+    print(json.dumps({"continue": False, "stopReason": "halted by %s" % tag}))
 if mode == "context":
     print(json.dumps({"hookSpecificOutput": {"additionalContext": "context from %s" % tag}}))
 if mode == "text":

@@ -112,6 +112,14 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(reply.exit_code, 0)
         self.assertEqual(json.loads(reply.stdout), {"decision": "block", "reason": "refused by stop"})
 
+    def test_continue_false_on_stop_passes_through_instead_of_keeping_codex_going(self) -> None:
+        for event in ("Stop", "SubagentStop"):
+            with self.subTest(event=event):
+                routes = [route(event, "", "a", "block"), route(event, "", "h", "halt")]
+                reply = run_hook({"hook_event_name": event, "agent_type": "x"}, routes)
+                self.assertEqual(reply.exit_code, 0)
+                self.assertEqual(json.loads(reply.stdout), {"continue": False, "stopReason": "halted by h"})
+
     def test_a_refusal_on_session_start_is_shown_not_enforced(self) -> None:
         reply = run_hook({"hook_event_name": "SessionStart", "source": "startup"},
                          [route("SessionStart", "", "s", "exit2")])

@@ -140,7 +140,9 @@ and `continue: false` block with their reason. `additionalContext` adds
 context, and plain stdout does too on `SessionStart` and `UserPromptSubmit`.
 The reply then takes the shape Codex documents for that event: exit 2 with
 stderr for tool and prompt events, `{"decision": "block"}` JSON for `Stop`
-and `SubagentStop` (Codex rejects plain text there), `continue: false` for
+and `SubagentStop` (Codex rejects plain text there; a hook's
+`continue: false` passes through as itself on those two, because Codex reads
+`decision: "block"` there as "keep going"), `continue: false` for
 `PreCompact`, and `systemMessage` for context on events where Codex accepts
 no `additionalContext`. A refusal on `SessionStart`, `SubagentStart`,
 `PostCompact` or `SessionEnd` is shown as a warning, as Claude Code does,

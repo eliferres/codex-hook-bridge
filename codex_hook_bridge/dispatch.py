@@ -119,7 +119,9 @@ def run_handler(command: str, payload: dict, timeout: float, env: dict) -> Resul
 
 
 def read_verdict(event: str, result: Result) -> Tuple[str, str]:
-    """('block', reason) | ('context', text) | ('message', text) | ('', '') for one hook's answer."""
+    """('stop', reason) | ('block', reason) | ('context', text) | ('message', text) | ('', '')
+    for one hook's answer. `continue: false` is 'stop': in Claude Code it ends
+    processing outright and takes precedence over any decision."""
     out = (result.stdout or "").strip()
     parsed = None
     if out.startswith("{") and out.endswith("}"):
@@ -130,6 +132,7 @@ def read_verdict(event: str, result: Result) -> Tuple[str, str]:
     if not isinstance(parsed, dict):
         parsed = None
 
+    stop_reason = ""
     block_reason = ""
     context = ""
     message = ""
@@ -138,16 +141,18 @@ def read_verdict(event: str, result: Result) -> Tuple[str, str]:
         if not isinstance(specific, dict):
             specific = {}
         decision = str(specific.get("permissionDecision") or "").lower()
+        if parsed.get("continue") is False:
+            stop_reason = str(parsed.get("stopReason") or parsed.get("reason") or "stopped by hook")
         if decision in ("deny", "ask"):
             reason = specific.get("permissionDecisionReason") or parsed.get("reason") or decision
             block_reason = (ASK_NOTE if decision == "ask" else "") + str(reason)
         elif str(parsed.get("decision") or "").lower() == "block":
             block_reason = str(parsed.get("reason") or "blocked by hook")
-        elif parsed.get("continue") is False:
-            block_reason = str(parsed.get("stopReason") or parsed.get("reason") or "stopped by hook")
         context = str(specific.get("additionalContext") or "")
         message = str(parsed.get("systemMessage") or "")
 
+    if stop_reason:
+        return "stop", stop_reason
     if result.returncode == 2:
         return "block", block_reason or (result.stderr or result.stdout or "blocked by hook").strip()
     if block_reason:
@@ -161,8 +166,14 @@ def read_verdict(event: str, result: Result) -> Tuple[str, str]:
     return "", ""
 
 
-def answer(event: str, blocks: List[str], contexts: List[str], messages: List[str]) -> Answer:
+def answer(event: str, blocks: List[str], contexts: List[str], messages: List[str],
+           stops: Optional[List[str]] = None) -> Answer:
     """The bridge's own reply to Codex, in the shape Codex documents for `event`."""
+    if stops and event in ("Stop", "SubagentStop"):
+        # Passed through: Codex reads {"decision": "block"} here as "keep going
+        # with this as a new prompt", the opposite of what continue: false asks.
+        return Answer(json.dumps({"continue": False, "stopReason": "\n\n".join(stops)}), "", 0)
+    blocks = blocks + list(stops or [])
     if blocks and event not in BLOCKING_EVENTS:
         messages = messages + blocks   # shown to the user; nothing to stop
         blocks = []
@@ -230,14 +241,16 @@ def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
     with ThreadPoolExecutor(max_workers=max(1, min(16, len(runnable)))) as pool:
         results = list(pool.map(run, runnable))
 
-    blocks, contexts, messages, notices = [], [], [], []
+    stops, blocks, contexts, messages, notices = [], [], [], [], []
     for job, result in zip(runnable, results):
         command = str(job.route.handler.get("command"))
         if result.timed_out:
             notices.append("codex-hook-bridge: %s timed out; treated as a non-blocking error" % command)
             continue
         kind, text = read_verdict(event, result)
-        if kind == "block":
+        if kind == "stop":
+            stops.append(text)
+        elif kind == "block":
             blocks.append(text)
         elif kind == "context":
             contexts.append(text)
@@ -251,7 +264,7 @@ def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
                 "could not start") else "exited %d" % result.returncode
             notices.append("codex-hook-bridge: %s %s%s; the call was not blocked" % (
                 command, what, (": " + detail[-1]) if detail else ""))
-    reply = answer(event, blocks, contexts, messages)
+    reply = answer(event, blocks, contexts, messages, stops)
     if notices:
         reply = reply._replace(stderr=reply.stderr + "\n".join(notices) + "\n")
     return reply

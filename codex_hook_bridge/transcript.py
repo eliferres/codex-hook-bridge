@@ -14,6 +14,9 @@ waiting are rewritten on the next refresh. A log that shrank or was replaced
 is rebuilt from the start. Usage is mapped so that input + cache read + cache
 write equals Codex's own input_tokens, which already includes the cached part.
 
+Copies, sidecars and locks not written for 30 days are removed whenever a
+copy is written, so finished sessions do not pile up.
+
 Any error returns "" and the hooks get the original path: a problem here must
 never break a tool call.
 """
@@ -30,6 +33,8 @@ from typing import Iterator, List, Optional, Tuple
 MAX_LINE = 1 << 20          # a Codex row longer than this is skipped, never parsed
 MAX_LOG = 200 * (1 << 20)   # a log larger than this is not mirrored
 LOCK_WAIT = 5.0             # seconds a refresh waits for a parallel refresh of the same log
+PRUNE_AGE = 30 * 86400      # seconds a copy may go unwritten before a later write removes it
+PRUNE_SUFFIXES = (".jsonl", ".json", ".lock")
 SAFE_ID = re.compile(r"^(?!\.+$)[A-Za-z0-9._-]{1,128}$")   # never all dots: '..' would leave the folder
 # Row types only a Claude Code transcript has: a log carrying one is already Claude's.
 CLAUDE_TYPES = ("user", "assistant", "system", "summary", "attachment", "file-history-snapshot")
@@ -288,6 +293,52 @@ def _refresh(src: str, meta: dict, dest: str, side: str) -> None:
     os.replace(tmp, side)
 
 
+def prune(state_dir: str, max_age: float = PRUNE_AGE) -> None:
+    """Remove copies, sidecars and locks not written for `max_age` seconds.
+
+    Only the layout this module writes is touched (<id>.jsonl at the top,
+    <root>/subagents/agent-*.jsonl, and .state/*), so a --state-dir pointed
+    at a shared folder never loses anything else.
+    """
+    cutoff = time.time() - max_age
+
+    def stale(path: str) -> bool:
+        try:
+            return os.path.isfile(path) and os.path.getmtime(path) < cutoff
+        except OSError:
+            return False
+
+    def remove(path: str) -> None:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    try:
+        top = os.listdir(state_dir)
+    except OSError:
+        return
+    for name in top:
+        path = os.path.join(state_dir, name)
+        if name.endswith(".jsonl") and SAFE_ID.match(name[:-6]) and stale(path):
+            remove(path)
+        elif name == ".state" and os.path.isdir(path):
+            for side in os.listdir(path):
+                if side.endswith(PRUNE_SUFFIXES) or ".json." in side:
+                    if stale(os.path.join(path, side)):
+                        remove(os.path.join(path, side))
+        elif SAFE_ID.match(name) and os.path.isdir(os.path.join(path, "subagents")):
+            subagents = os.path.join(path, "subagents")
+            for sub in os.listdir(subagents):
+                if sub.startswith("agent-") and sub.endswith(".jsonl") and stale(os.path.join(subagents, sub)):
+                    remove(os.path.join(subagents, sub))
+            for folder in (subagents, path):
+                try:
+                    os.rmdir(folder)   # only succeeds once empty
+                except OSError:
+                    pass
+
+
 def mirror(payload: dict, state_dir: Optional[str] = None) -> str:
     """The path of the refreshed Claude-shaped copy of the Codex log at
     payload["transcript_path"]; a Claude Code transcript comes back as given;
@@ -319,6 +370,7 @@ def mirror(payload: dict, state_dir: Optional[str] = None) -> str:
                         return dest if os.path.exists(dest) else ""
                     time.sleep(0.05)
             _refresh(src, meta, dest, side)
+        prune(state_dir)
         return dest
     except Exception:   # never let the copy break a tool call
         return ""

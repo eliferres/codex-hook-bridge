@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 import unittest
 
 from codex_hook_bridge.transcript import mirror
@@ -140,6 +141,37 @@ class Mirror(unittest.TestCase):
         self.assertEqual(self.mirror(os.path.join(self.tmp.name, "missing.jsonl")), "")
         self.write(["not json", "{}"])
         self.assertEqual(self.mirror(), "")
+
+    def test_copies_untouched_for_30_days_are_pruned_on_write(self) -> None:
+        old_copy = os.path.join(self.state, "old-session.jsonl")
+        old_side = os.path.join(self.state, ".state", "old-session.json")
+        old_sub = os.path.join(self.state, "old-root", "subagents", "agent-x.jsonl")
+        recent = os.path.join(self.state, "recent-session.jsonl")
+        for path in (old_copy, old_side, old_sub, recent):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write("{}\n")
+        month_ago = time.time() - 31 * 86400
+        for path in (old_copy, old_side, old_sub):
+            os.utime(path, (month_ago, month_ago))
+        self.write([meta("root-1"), user("hi")])
+        self.mirror()
+        self.assertFalse(os.path.exists(old_copy))
+        self.assertFalse(os.path.exists(old_side))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "old-root")))
+        self.assertTrue(os.path.exists(recent))
+        self.assertTrue(os.path.exists(os.path.join(self.state, "root-1.jsonl")))
+
+    def test_pruning_leaves_files_the_bridge_did_not_write(self) -> None:
+        other = os.path.join(self.state, "notes", "old.json")
+        os.makedirs(os.path.dirname(other))
+        with open(other, "w") as fh:
+            fh.write("{}")
+        month_ago = time.time() - 31 * 86400
+        os.utime(other, (month_ago, month_ago))
+        self.write([meta("root-1"), user("hi")])
+        self.mirror()
+        self.assertTrue(os.path.exists(other))
 
     def test_an_unsafe_session_id_is_not_used_as_a_file_name(self) -> None:
         self.write([meta(".."), user("x")])

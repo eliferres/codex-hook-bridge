@@ -166,7 +166,7 @@ SOURCE_MAX = 200_000   # bytes read from a copy's source file to show what it wr
 INPLACE_PROGS = ("sed", "gsed", "perl", "ruby")
 OUTPUT_OPTIONS = {"curl": ("-o", "--output"), "wget": ("-O", "--output-document"),
                   "tar": ("-C", "--directory"), "unzip": ("-d",)}
-WRAPPERS = ("sudo", "env", "command", "nohup", "time", "nice", "exec", "xargs", "doas")
+WRAPPERS = ("sudo", "env", "command", "nohup", "time", "timeout", "nice", "exec", "xargs", "doas")
 WRITERS = ("cp", "mv", "install", "rsync", "ditto", "ln", "tee", "truncate", "touch", "dd",
            "curl", "wget", "tar", "unzip", "git", "sed", "gsed", "perl", "ruby",
            "bash", "sh", "zsh", "dash")
@@ -200,6 +200,9 @@ def _segments(command: str) -> Iterator[List[str]]:
     cuts = [0] + [m.end() for m in SEGMENT_RX.finditer(masked)] + [len(command)]
     for i in range(len(cuts) - 1):
         words = _words(command[cuts[i]:cuts[i + 1]].rstrip(";&|\n"))
+        # a subshell's parentheses are not part of the program or file names
+        words = [w for w in (w.lstrip("(") if j == 0 else w for j, w in enumerate(words)) if w]
+        words = [w.rstrip(")") or w for w in words]
         while words and "=" in words[0] and words[0].split("=")[0].isidentifier():
             words = words[1:]   # leading VAR=value assignments
         if words:
@@ -216,7 +219,7 @@ def redirect_targets(command: str) -> List[str]:
             continue   # >&2, a descriptor duplication, or part of <<
         first_line = rest[:rest.find("\n")] if "\n" in rest else rest
         word = (_words(first_line) or [""])[0]
-        found.append(re.split(r"[;&|]", word)[0])   # `> f; ls`: the separator is not the name
+        found.append(re.split(r"[;&|)]", word)[0])   # `> f; ls`, `(... > f)`: not part of the name
     return found
 
 
@@ -251,8 +254,12 @@ def segment_targets(words: List[str]) -> List[str]:
             return []
         words = words[index:]
     prog = os.path.basename(words[0])
-    if prog in SHELLS and "-c" in words[1:-1]:
-        return shell_targets(words[words.index("-c") + 1])
+    if prog in SHELLS:
+        # -c alone or combined with other flags (-lc, -ec): the next word is the command
+        flag = next((i for i, w in enumerate(words[1:-1], 1)
+                     if w.startswith("-") and not w.startswith("--") and "c" in w[1:]), None)
+        if flag is not None:
+            return shell_targets(words[flag + 1])
     operands = [w for w in words[1:] if not w.startswith("-")]
     if prog in INPLACE_PROGS:
         return inplace_files(words)
@@ -260,10 +267,15 @@ def segment_targets(words: List[str]) -> List[str]:
         return operands
     if prog in ("cp", "mv", "install", "rsync", "ditto", "ln"):
         for i, w in enumerate(words):
+            target, value_index = None, None
             if w in ("-t", "--target-directory") and i + 1 < len(words):
-                return [words[i + 1]]
-            if w.startswith("--target-directory="):
-                return [w.split("=", 1)[1]]
+                target, value_index = words[i + 1], i + 1
+            elif w.startswith("--target-directory="):
+                target = w.split("=", 1)[1]
+            if target is not None:
+                # each source lands under the target directory under its own name
+                sources = [s for j, s in enumerate(words[1:], 1) if j != value_index and not s.startswith("-")]
+                return [os.path.join(target, os.path.basename(s.rstrip("/"))) for s in sources] or [target]
         return [operands[-1]] if len(operands) >= 2 else []
     if prog in ("truncate", "touch"):
         return [w for w in operands if not w[:1].isdigit()]

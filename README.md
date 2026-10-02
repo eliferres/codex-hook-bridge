@@ -159,9 +159,11 @@ by a hook that matches every tool. Only an exact duplicate goes: the same
 handler defined in two settings files runs once per payload, as in Claude
 Code.
 
-**Matchers follow Claude Code's rule exactly**: empty or `*` matches all; a
-matcher of only letters, digits, `_`, `-`, spaces, commas and `|` is a list
-of exact names; anything else is an unanchored regular expression. Lifecycle
+**Matchers take the same shapes as in Claude Code**: empty or `*` matches
+all; a matcher of only letters, digits, `_`, `-`, spaces, commas and `|` is a
+list of literal names; anything else is an unanchored regular expression,
+evaluated with Python's `re`, which differs from JavaScript's on some
+patterns (see Limitations). Lifecycle
 events match on their own field (`source` for `SessionStart`, `trigger` for
 compaction, `agent_type` for subagents, `reason` for `SessionEnd`).
 

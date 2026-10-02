@@ -568,9 +568,9 @@ def matcher_fits(matcher: Optional[str], value: str) -> bool:
     Empty, "*" or absent matches everything. A matcher of only letters,
     digits, `_`, `-`, spaces, commas and bars is an exact name or a list of
     exact names split on `|` or `,`. Anything else is a regular expression
-    searched anywhere in the value, so `^` and `$` do the anchoring. Python's
-    `re` stands in for JavaScript's RegExp; the two agree on the patterns
-    matchers use in practice.
+    searched anywhere in the value, so `^` and `$` do the anchoring. It is
+    evaluated with Python's `re` in place of JavaScript's RegExp, and the
+    two differ on some patterns.
     """
     if matcher in MATCH_ALL:
         return True

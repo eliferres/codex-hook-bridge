@@ -8,6 +8,7 @@ import sys
 from typing import List, Optional
 
 from . import __version__
+from . import parity
 from .dispatch import run_hook
 from .settings import SettingsError, load_routes
 from .transcript import default_state_dir, mirror
@@ -79,6 +80,14 @@ def cmd_translate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_parity(args: argparse.Namespace) -> int:
+    routes = load_routes(args.settings, _project_dir(args))
+    accepted = parity.load_accepted(args.accept) if args.accept else None
+    findings = parity.check(routes, accepted)
+    print(parity.as_json(findings) if args.json else parity.render(findings))
+    return 1 if parity.failed(findings) else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROG, description="Run Claude Code hooks under the Codex CLI without rewriting them.")
@@ -90,7 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="a Claude Code settings file to read hooks from (repeatable); default: "
                             "the user, project and local settings files, merged")
         p.add_argument("--project-dir", metavar="DIR",
-                       help="project whose .claude/ settings apply; default: the payload's cwd")
+                       help="project whose .claude/ settings apply; default: the payload's cwd "
+                            "(hook) or the current directory (parity)")
 
     hook = sub.add_parser("hook", help="run as a Codex hook: payload on stdin, reply on stdout and exit code")
     settings_options(hook)
@@ -106,6 +116,13 @@ def build_parser() -> argparse.ArgumentParser:
     tr = sub.add_parser("translate", help="print the Claude Code payloads a Codex payload on stdin becomes")
     tr.add_argument("--json", action="store_true", help="print the full payloads as JSON")
     tr.set_defaults(func=cmd_translate)
+
+    par = sub.add_parser("parity", help="list every hook route and whether a Codex action can reach it")
+    settings_options(par)
+    par.add_argument("--accept", metavar="FILE",
+                     help="JSON list of {event, matcher, command, reason} for routes you know Codex cannot reach")
+    par.add_argument("--json", action="store_true", help="print the report as JSON")
+    par.set_defaults(func=cmd_parity)
     return parser
 
 

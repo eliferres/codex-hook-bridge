@@ -38,9 +38,11 @@ def _project_dir(args: argparse.Namespace, payload: Optional[dict] = None) -> st
 
 def cmd_hook(args: argparse.Namespace) -> int:
     payload = _read_payload()
-    routes = load_routes(args.settings, _project_dir(args, payload))
+    project = _project_dir(args, payload)
+    routes = load_routes(args.settings, project)
     transcript = mirror(payload, args.state_dir)
-    reply = run_hook(payload, routes, event=args.event, budget=args.budget, transcript_path=transcript)
+    reply = run_hook(payload, routes, event=args.event, budget=args.budget, transcript_path=transcript,
+                     project_dir=project)
     if reply.stdout:
         print(reply.stdout)
     if reply.stderr:

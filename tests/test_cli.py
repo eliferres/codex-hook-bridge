@@ -65,6 +65,21 @@ class CommandLine(unittest.TestCase):
             seen = json.loads(fh.readline())
         self.assertEqual(seen["transcript_path"], os.path.join(state, "sess-1.jsonl"))
 
+    def test_project_dir_is_the_claude_project_dir_hooks_see(self) -> None:
+        project = os.path.join(self.tmp.name, "project")
+        os.makedirs(os.path.join(project, ".claude"))
+        hook = os.path.join(project, ".claude", "guard.py")
+        with open(hook, "w") as fh:
+            fh.write("import sys\nsys.stderr.write('guarded\\n')\nsys.exit(2)\n")
+        with open(os.path.join(project, ".claude", "settings.json"), "w") as fh:
+            json.dump({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+                {"type": "command", "command": '"%s" "$CLAUDE_PROJECT_DIR/.claude/guard.py"' % sys.executable}]}]}}, fh)
+        payload = {"hook_event_name": "PreToolUse", "cwd": os.path.join(project, "src"), "tool_name": "Bash",
+                   "tool_input": {"command": "ls"}}
+        proc = cli(["hook", "--project-dir", project], json.dumps(payload),
+                   env={"CLAUDE_CONFIG_DIR": os.path.join(self.tmp.name, "none")})
+        self.assertEqual((proc.returncode, proc.stderr), (2, "guarded\n"))
+
     def test_a_broken_settings_file_in_hook_mode_is_one_line_and_exit_1(self) -> None:
         with open(self.settings, "w") as fh:
             fh.write("{oops")

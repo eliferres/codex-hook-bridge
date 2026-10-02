@@ -128,8 +128,9 @@ no longer in the settings, is reported too.
 would otherwise block every tool call or loop the session.
 
 Hooks run with the bridge's environment plus `CLAUDE_PROJECT_DIR` (the
-payload's `cwd`) and `CODEX_HOOK_BRIDGE=1`, which a hook can test to behave
-differently under Codex.
+project folder: `--project-dir` when given, else the payload's `cwd`) and
+`CODEX_HOOK_BRIDGE=1`, which a hook can test to behave differently under
+Codex.
 
 ## How it works
 
@@ -168,7 +169,8 @@ the source file of a `cp`) so content checks have something to read.
 
 **Timeouts and crashes do not block**, matching Claude Code, where a hook
 that times out or exits with anything but 0 or 2 is a non-blocking error.
-Each hook runs in its own process group, so a timeout also stops whatever it
+Each such hook is named on stderr, including one whose command could not
+start, so a broken path never passes unnoticed. Each hook runs in its own process group, so a timeout also stops whatever it
 started.
 
 **Transcripts are converted.** Hooks that open `transcript_path` expect

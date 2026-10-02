@@ -124,6 +124,12 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(reply.exit_code, 0)
         self.assertIn("exited 1: something broke", reply.stderr)
 
+    def test_a_hook_command_that_cannot_start_is_reported_not_silent(self) -> None:
+        missing = Route("PreToolUse", "Bash", {"type": "command", "command": "/no/such/hook.sh"}, "test")
+        reply = run_hook(pre("Bash", {"command": "ls"}), [missing])
+        self.assertEqual(reply.exit_code, 0)
+        self.assertIn("/no/such/hook.sh could not start", reply.stderr)
+
     def test_a_hook_past_its_timeout_does_not_hold_the_call(self) -> None:
         started = time.monotonic()
         reply = run_hook(pre("Bash", {"command": "ls"}), [route("PreToolUse", "Bash", "slow", "sleep", timeout=1)])

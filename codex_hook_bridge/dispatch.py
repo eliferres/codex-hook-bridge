@@ -185,19 +185,19 @@ def answer(event: str, blocks: List[str], contexts: List[str], messages: List[st
     return Answer(json.dumps(reply) if reply else "", "", 0)
 
 
-def hook_env(payload: dict) -> dict:
+def hook_env(payload: dict, project_dir: str = "") -> dict:
     """The environment a hook runs in: the bridge's own, plus CLAUDE_PROJECT_DIR
-    (the one session variable Claude Code documents for hooks) and a marker a
-    hook can test to know it is running under Codex."""
+    (the project folder whose settings were read, else the payload's cwd) and
+    a marker a hook can test to know it is running under Codex."""
     env = dict(os.environ, CODEX_HOOK_BRIDGE="1")
-    cwd = str(payload.get("cwd") or "")
-    if cwd:
-        env["CLAUDE_PROJECT_DIR"] = cwd
+    project = project_dir or str(payload.get("cwd") or "")
+    if project:
+        env["CLAUDE_PROJECT_DIR"] = project
     return env
 
 
 def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
-             budget: float = 25.0, transcript_path: str = "") -> Answer:
+             budget: float = 25.0, transcript_path: str = "", project_dir: str = "") -> Answer:
     """Translate one Codex hook payload, run every matching Claude Code hook in
     parallel inside `budget` seconds, and return the reply for Codex.
 
@@ -214,7 +214,7 @@ def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
     jobs = jobs_for(event, payload, routes)
     if not jobs:
         return Answer("", "", 0)
-    env = hook_env(payload)
+    env = hook_env(payload, project_dir)
 
     def run(job: Job) -> Result:
         handler = job.route.handler
@@ -245,9 +245,13 @@ def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
         elif kind == "message":
             messages.append(text)
         elif result.returncode not in (0, 2):
+            # Non-blocking, as in Claude Code, but never silent: a hook that
+            # could not start (126, 127) is named as such.
             detail = (result.stderr or "").strip().splitlines()
-            notices.append("codex-hook-bridge: %s exited %d%s" % (
-                command, result.returncode, (": " + detail[-1]) if detail else ""))
+            what = "could not start" if result.returncode in (126, 127) or result.stderr.startswith(
+                "could not start") else "exited %d" % result.returncode
+            notices.append("codex-hook-bridge: %s %s%s; the call was not blocked" % (
+                command, what, (": " + detail[-1]) if detail else ""))
     reply = answer(event, blocks, contexts, messages)
     if notices:
         reply = reply._replace(stderr=reply.stderr + "\n".join(notices) + "\n")

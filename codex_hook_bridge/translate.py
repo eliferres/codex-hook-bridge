@@ -45,9 +45,8 @@ def absolute(path: str, cwd: str) -> str:
     path = os.path.expanduser(str(path).strip().strip("'\""))
     if path.startswith("file://"):
         path = path[7:]
-    if os.path.isabs(path):
-        return path
-    return os.path.normpath(os.path.join(cwd or os.getcwd(), path))
+    # normalized either way, so `/a/b/../.env` reaches a hook as `/a/.env`
+    return os.path.normpath(path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path))
 
 
 def shell_quote(text: str) -> str:

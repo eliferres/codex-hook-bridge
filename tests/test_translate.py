@@ -87,6 +87,13 @@ class ApplyPatch(unittest.TestCase):
         self.assertEqual(names(out), [("Edit", "/work/app/a.py")])
         self.assertEqual(out[0]["tool_input"]["new_string"], "y\n*** Add File: .env")
 
+    def test_absolute_paths_with_dot_dot_are_normalized_like_relative_ones(self) -> None:
+        body = "*** Begin Patch\n*** Add File: /work/app/src/../.env\n+K=1\n*** End Patch"
+        out = translate(codex("apply_patch", {"command": body}))
+        self.assertEqual(names(out), [("Write", "/work/app/.env")])
+        out = translate(codex("Bash", {"command": "echo x > /work/app/./a/../b.txt"}))
+        self.assertEqual(out[1]["tool_input"]["file_path"], "/work/app/b.txt")
+
     def test_every_payload_keeps_the_session_fields_and_names_the_codex_tool(self) -> None:
         for p in translate(codex("apply_patch", {"command": PATCH})):
             self.assertEqual(p["session_id"], "s1")

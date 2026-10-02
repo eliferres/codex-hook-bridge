@@ -10,6 +10,7 @@ from typing import List, Optional
 from . import __version__
 from .dispatch import run_hook
 from .settings import SettingsError, load_routes
+from .transcript import default_state_dir, mirror
 from .translate import translate
 
 PROG = "codex-hook-bridge"
@@ -37,7 +38,8 @@ def _project_dir(args: argparse.Namespace, payload: Optional[dict] = None) -> st
 def cmd_hook(args: argparse.Namespace) -> int:
     payload = _read_payload()
     routes = load_routes(args.settings, _project_dir(args, payload))
-    reply = run_hook(payload, routes, event=args.event, budget=args.budget)
+    transcript = mirror(payload, args.state_dir)
+    reply = run_hook(payload, routes, event=args.event, budget=args.budget, transcript_path=transcript)
     if reply.stdout:
         print(reply.stdout)
     if reply.stderr:
@@ -96,6 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     hook.add_argument("--budget", type=float, default=25.0, metavar="SECONDS",
                       help="time for all hooks of one call together (default 25; keep it under "
                            "the timeout set on the Codex hook)")
+    hook.add_argument("--state-dir", default=default_state_dir(), metavar="DIR",
+                      help="where Claude-shaped copies of Codex session logs are kept "
+                           "(default: $XDG_STATE_HOME/codex-hook-bridge/transcripts)")
     hook.set_defaults(func=cmd_hook)
 
     tr = sub.add_parser("translate", help="print the Claude Code payloads a Codex payload on stdin becomes")

@@ -50,6 +50,21 @@ class CommandLine(unittest.TestCase):
         proc = cli(["hook"], json.dumps(payload), env={"CLAUDE_CONFIG_DIR": os.path.join(self.tmp.name, "none")})
         self.assertEqual(proc.returncode, 2)
 
+    def test_hooks_get_the_claude_shaped_copy_of_a_codex_session_log(self) -> None:
+        log = os.path.join(self.tmp.name, "rollout.jsonl")
+        with open(log, "w") as fh:
+            fh.write(json.dumps({"type": "session_meta", "payload": {"id": "sess-1"}}) + "\n")
+        command = '"%s" "%s" seen allow' % (sys.executable, FIXTURE)
+        with open(self.settings, "w") as fh:
+            json.dump({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]}}, fh)
+        state = os.path.join(self.tmp.name, "state")
+        payload = {"hook_event_name": "Stop", "transcript_path": log}
+        cli(["hook", "--settings", self.settings, "--state-dir", state], json.dumps(payload),
+            env={"HOOK_RECORD_DIR": self.tmp.name})
+        with open(os.path.join(self.tmp.name, "seen.jsonl")) as fh:
+            seen = json.loads(fh.readline())
+        self.assertEqual(seen["transcript_path"], os.path.join(state, "sess-1.jsonl"))
+
     def test_a_broken_settings_file_in_hook_mode_is_one_line_and_exit_1(self) -> None:
         with open(self.settings, "w") as fh:
             fh.write("{oops")

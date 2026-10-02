@@ -1,0 +1,80 @@
+"""The command line, run as a subprocess the way Codex runs it."""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+from codex_hook_bridge import __version__
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FIXTURE = os.path.join(ROOT, "tests", "fixtures", "hook.py")
+
+
+def cli(args: list, stdin: str = "", env: dict = None) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, "-m", "codex_hook_bridge"] + args, input=stdin,
+                          capture_output=True, text=True, cwd=ROOT, env=dict(os.environ, **(env or {})))
+
+
+class CommandLine(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.settings = os.path.join(self.tmp.name, "settings.json")
+        command = '"%s" "%s" guard exit2' % (sys.executable, FIXTURE)
+        with open(self.settings, "w") as fh:
+            json.dump({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+                {"type": "command", "command": command}]}]}}, fh)
+
+    def test_version_prints_the_command_and_version(self) -> None:
+        proc = cli(["--version"])
+        self.assertEqual((proc.returncode, proc.stdout), (0, "codex-hook-bridge %s\n" % __version__))
+
+    def test_no_command_is_a_usage_error(self) -> None:
+        self.assertEqual(cli([]).returncode, 2)
+
+    def test_hook_refuses_with_exit_2_and_the_hooks_reason(self) -> None:
+        payload = {"hook_event_name": "PreToolUse", "cwd": self.tmp.name, "tool_name": "Bash",
+                   "tool_input": {"command": "rm -rf build"}}
+        proc = cli(["hook", "--settings", self.settings], json.dumps(payload))
+        self.assertEqual((proc.returncode, proc.stderr), (2, "refused by guard\n"))
+
+    def test_hook_reads_the_project_settings_from_the_payload_cwd(self) -> None:
+        os.makedirs(os.path.join(self.tmp.name, ".claude"))
+        os.rename(self.settings, os.path.join(self.tmp.name, ".claude", "settings.json"))
+        payload = {"hook_event_name": "PreToolUse", "cwd": self.tmp.name, "tool_name": "Bash",
+                   "tool_input": {"command": "ls"}}
+        proc = cli(["hook"], json.dumps(payload), env={"CLAUDE_CONFIG_DIR": os.path.join(self.tmp.name, "none")})
+        self.assertEqual(proc.returncode, 2)
+
+    def test_a_broken_settings_file_in_hook_mode_is_one_line_and_exit_1(self) -> None:
+        with open(self.settings, "w") as fh:
+            fh.write("{oops")
+        proc = cli(["hook", "--settings", self.settings], '{"hook_event_name": "Stop"}')
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(len(proc.stderr.splitlines()), 1)
+        self.assertIn("is not valid JSON", proc.stderr)
+
+    def test_translate_prints_one_line_per_payload(self) -> None:
+        payload = {"tool_name": "Bash", "cwd": "/work/app", "tool_input": {"command": "echo hi > a.txt"}}
+        proc = cli(["translate"], json.dumps(payload))
+        self.assertEqual(proc.stdout.splitlines(), ["Bash       echo hi > a.txt",
+                                                    "Write      /work/app/a.txt  [shell-write]"])
+
+    def test_translate_json_prints_the_full_payloads(self) -> None:
+        payload = {"tool_name": "view_image", "cwd": "/w", "tool_input": {"path": "x.png"}}
+        out = json.loads(cli(["translate", "--json"], json.dumps(payload)).stdout)
+        self.assertEqual(out[0]["tool_input"], {"file_path": "/w/x.png"})
+
+    def test_input_that_is_not_json_is_a_usage_error_without_a_traceback(self) -> None:
+        proc = cli(["translate"], "not json")
+        self.assertEqual(proc.returncode, 2)
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertTrue(proc.stderr.startswith("codex-hook-bridge: stdin is not JSON"))
+
+
+if __name__ == "__main__":
+    unittest.main()

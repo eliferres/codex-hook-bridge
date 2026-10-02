@@ -36,8 +36,8 @@ Call = Tuple[str, dict, str]   # (Claude tool name, tool_input, derivation tag o
 # ---------------------------------------------------------------------------
 # apply_patch
 
-PATCH_FILE_RX = re.compile(r"^\*\*\* (Add|Update|Delete) File:\s*(.+?)\s*$")
-PATCH_MOVE_RX = re.compile(r"^\*\*\* Move to:\s*(.+?)\s*$")
+PATCH_HEADERS = (("*** Add File: ", "add"), ("*** Delete File: ", "delete"), ("*** Update File: ", "update"))
+PATCH_MOVE = "*** Move to: "
 
 
 def absolute(path: str, cwd: str) -> str:
@@ -70,38 +70,40 @@ def parse_patch(body: str) -> List[dict]:
         if cur is not None and hunk is not None and (hunk[0] or hunk[1]):
             cur["hunks"].append(("\n".join(hunk[0]), "\n".join(hunk[1])))
 
-    for line in body.splitlines():
-        m = PATCH_FILE_RX.match(line)
-        if m:
+    # Header lines are recognized the way Codex's own parser does it: with the
+    # line trimmed on both sides, except inside an Update section, where only
+    # trailing space is trimmed, so an indented header there is a context line.
+    for line in body.strip().splitlines():
+        line = line[:-1] if line.endswith("\r") else line
+        in_update = cur is not None and cur["op"] == "update"
+        marker_text = line.rstrip() if in_update else line.strip()
+        header = next(((op, marker_text[len(m):]) for m, op in PATCH_HEADERS if marker_text.startswith(m)), None)
+        if header:
             close_hunk()
-            cur = {"op": m.group(1).lower(), "path": m.group(2), "move_to": "",
-                   "added": [], "hunks": []}
+            cur = {"op": header[0], "path": header[1], "move_to": "", "added": [], "hunks": []}
             hunk = [[], []] if cur["op"] == "update" else None
             files.append(cur)
             continue
-        if cur is None or line.startswith(("*** End Patch", "*** Begin Patch")):
-            continue
-        m = PATCH_MOVE_RX.match(line)
-        if m:
-            cur["move_to"] = m.group(1)
-            continue
-        if line.startswith("*** End of File"):
+        if marker_text in ("*** End Patch", "*** Begin Patch") or cur is None:
             continue
         if cur["op"] == "add":
             if line.startswith("+"):
                 cur["added"].append(line[1:])
         elif cur["op"] == "update":
-            if line.startswith("@@"):
+            if marker_text.startswith(PATCH_MOVE) and not cur["hunks"] and not (hunk[0] or hunk[1]):
+                cur["move_to"] = marker_text[len(PATCH_MOVE):]
+            elif marker_text == "*** End of File":
+                continue
+            elif marker_text == "@@" or marker_text.startswith("@@ "):
                 close_hunk()
                 hunk = [[], []]
             elif line.startswith("-"):
                 hunk[0].append(line[1:])
             elif line.startswith("+"):
                 hunk[1].append(line[1:])
-            else:
-                context = line[1:] if line.startswith(" ") else line
-                hunk[0].append(context)
-                hunk[1].append(context)
+            elif line.startswith(" ") or not line:
+                hunk[0].append(line[1:])
+                hunk[1].append(line[1:])
     close_hunk()
     return files
 

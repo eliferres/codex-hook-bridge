@@ -74,6 +74,19 @@ class ApplyPatch(unittest.TestCase):
         self.assertIn(("Edit", "/work/app/src/app.py"), names(out))
         self.assertIn(("Write", "/work/app/.env"), names(out))
 
+    def test_indented_file_headers_are_read_because_codex_trims_each_line(self) -> None:
+        body = ("*** Begin Patch\n *** Add File: .env\n+K=1\n\t*** Add File: b/.env\n+K=2\n"
+                "  *** Update File: a.py\n@@\n-x\n+y\n*** End Patch")
+        out = translate(codex("apply_patch", {"command": body}))
+        self.assertEqual(names(out), [("Write", "/work/app/.env"), ("Write", "/work/app/b/.env"),
+                                      ("Edit", "/work/app/a.py")])
+
+    def test_an_indented_header_inside_an_update_section_is_context_as_in_codex(self) -> None:
+        body = "*** Begin Patch\n*** Update File: a.py\n@@\n-x\n+y\n *** Add File: .env\n*** End Patch"
+        out = translate(codex("apply_patch", {"command": body}))
+        self.assertEqual(names(out), [("Edit", "/work/app/a.py")])
+        self.assertEqual(out[0]["tool_input"]["new_string"], "y\n*** Add File: .env")
+
     def test_every_payload_keeps_the_session_fields_and_names_the_codex_tool(self) -> None:
         for p in translate(codex("apply_patch", {"command": PATCH})):
             self.assertEqual(p["session_id"], "s1")

@@ -62,8 +62,8 @@ Claude Code matchers decide what runs.
 ```
 
 Codex asks you to review and trust a new hook before it runs it: open
-`/hooks` in the CLI once after adding these. Codex hooks do not run on
-Windows.
+`/hooks` in the CLI once after adding these. The bridge itself runs on macOS
+and Linux.
 
 ## What a Codex call becomes
 
@@ -191,6 +191,13 @@ usage is mapped so input plus cache read equals Codex's own input count.
   through the shell, so those calls reach `Bash` hooks), `PowerShell`,
   `NotebookEdit` (notebook edits arrive as `apply_patch`), `ExitPlanMode`,
   `Skill`, `TodoWrite` and `Workflow`. `parity` names each with its reason.
+- **macOS and Linux only.** The bridge locks the transcript copy with `fcntl`
+  and stops timed-out hooks by process group, neither of which exists on
+  Windows, so it does not run there even though Codex hooks can.
+- **An unreadable subagent brief is passed on as is.** When Codex hands the
+  hook an encrypted or empty `spawn_agent` message, `Agent` hooks receive
+  that text as `prompt`; a hook that checks briefs should treat an
+  unreadable one as its own decision to make.
 - **Only `command` hooks run.** `http`, `mcp_tool`, `prompt` and `agent`
   handlers are skipped, and `parity` says so. The handler-level `if` field is
   not evaluated, so a hook narrowed with `if` runs on every call its matcher

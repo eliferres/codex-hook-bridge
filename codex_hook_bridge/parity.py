@@ -53,7 +53,7 @@ CLAUDE_ONLY_EVENTS: Dict[str, str] = {
 CLAUDE_ONLY_TOOLS: Dict[str, str] = {
     "Glob": "Codex searches through its shell, so a search reaches Bash hooks instead",
     "Grep": "Codex searches through its shell, so a search reaches Bash hooks instead",
-    "PowerShell": "Codex reports every shell call as Bash, and its hooks do not run on Windows",
+    "PowerShell": "Codex reports every shell call as Bash",
     "NotebookEdit": "Codex edits notebooks with apply_patch, which reaches Write and Edit hooks",
     "ExitPlanMode": "Codex plan mode is a setting, not a tool call a hook sees",
     "Skill": "Codex reads skills as files; there is no skill tool call",

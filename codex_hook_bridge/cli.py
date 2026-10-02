@@ -21,6 +21,14 @@ class UsageError(Exception):
     """Bad input on the command line or stdin."""
 
 
+class _Parser(argparse.ArgumentParser):
+    """An argument parser that raises instead of exiting, so hook mode can
+    choose its own exit code: argparse's exit 2 reads to Codex as a refusal."""
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        raise UsageError(message)
+
+
 def _read_payload() -> dict:
     raw = sys.stdin.read()
     try:
@@ -91,7 +99,7 @@ def cmd_parity(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog=PROG, description="Run Claude Code hooks under the Codex CLI without rewriting them.")
     parser.add_argument("--version", action="version", version="%s %s" % (PROG, __version__))
     sub = parser.add_subparsers(dest="command", metavar="command")
@@ -129,11 +137,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except UsageError as exc:
+        sys.stderr.write("%s: %s\n" % (PROG, exc))
+        return 1 if argv[:1] == ["hook"] else 2
     if not getattr(args, "func", None):
-        parser.print_usage(sys.stderr)
-        sys.stderr.write("%s: error: a command is required (hook, translate, parity)\n" % PROG)
+        sys.stderr.write("%s: a command is required (hook, translate, parity)\n" % PROG)
         return 2
     try:
         return args.func(args)

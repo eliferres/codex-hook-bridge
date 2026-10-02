@@ -118,7 +118,7 @@ no longer in the settings, is reported too.
 |---|---|---|
 | `hook` | 0 | proceed; any context or warning is JSON on stdout |
 | `hook` | 2 | refused; the hooks' reasons are on stderr |
-| `hook` | 1 | the bridge itself could not run (unreadable settings, a payload that is not JSON); one line on stderr, and Codex proceeds |
+| `hook` | 1 | the bridge itself could not run (a bad option, unreadable settings, a payload that is not JSON, an internal error); one line on stderr, and Codex proceeds |
 | `parity` | 0 | every route reached, unreachable for a known reason, or accepted |
 | `parity` | 1 | at least one route unaccounted, or the accept file has drifted |
 | `parity`, `translate` | 2 | usage or configuration error, one line on stderr |

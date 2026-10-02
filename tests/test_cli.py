@@ -110,6 +110,17 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(err.getvalue(), "codex-hook-bridge: internal error: RuntimeError: boom\n")
 
+    def test_a_bad_option_in_hook_mode_is_one_line_and_exit_1_not_a_refusal(self) -> None:
+        proc = cli(["hook", "--budget", "abc"], '{"hook_event_name": "Stop"}')
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(len(proc.stderr.splitlines()), 1)
+        self.assertIn("--budget", proc.stderr)
+
+    def test_a_bad_option_elsewhere_is_one_line_and_exit_2(self) -> None:
+        proc = cli(["parity", "--bogus"])
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(len(proc.stderr.splitlines()), 1)
+
     def test_translate_prints_one_line_per_payload(self) -> None:
         payload = {"tool_name": "Bash", "cwd": "/work/app", "tool_input": {"command": "echo hi > a.txt"}}
         proc = cli(["translate"], json.dumps(payload))

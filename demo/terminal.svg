@@ -1,14 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 828" role="img" aria-labelledby="t d" font-family="SF Mono, Menlo, Consolas, monospace" font-size="16">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 856" role="img" aria-labelledby="t d" font-family="SF Mono, Menlo, Consolas, monospace" font-size="16" xml:space="preserve">
   <title id="t">codex-hook-bridge demo terminal</title>
   <desc id="d">Terminal session showing codex-hook-bridge splitting a Codex patch into one Edit and one Write, refusing that patch because a Claude Code hook denies the .env write, refusing a publish command through an exit-2 hook, and ending on a parity report of five routes with one unaccounted, exit 1.</desc>
   <style>
+    text { white-space: pre; }
     .p { fill: #7ee2a8; }
     .cmd { fill: #e8eef5; }
     .dim { fill: #9fb0c0; }
     .bad { fill: #ff9494; }
     .good { fill: #7ee2a8; }
   </style>
-  <rect width="660" height="828" rx="14" fill="#0b0f14"/>
+  <rect width="660" height="856" rx="14" fill="#0b0f14"/>
   <rect width="660" height="40" rx="14" fill="#11161d"/>
   <rect y="26" width="660" height="14" fill="#11161d"/>
   <circle cx="26" cy="20" r="6" fill="#ff5f57"/>
@@ -30,7 +31,7 @@
   <text x="24" y="408" class="dim">publishing is done by the release workflow, not by hand</text>
   <text x="24" y="436" class="dim">exit 2</text>
   <text x="24" y="464"><tspan class="p">$</tspan><tspan class="cmd" dx="8">python3 -m codex_hook_bridge parity --settings \</tspan></text>
-  <text x="24" y="492" class="cmd">    demo/settings.json</text>
+  <text x="24" y="492" class="cmd">    demo/settings.json; echo &quot;exit $?&quot;</text>
   <text x="24" y="520" class="dim">reached      PreToolUse [Bash]: python3 demo/hooks/no_publi…</text>
   <text x="24" y="548" class="dim">             via Bash</text>
   <text x="24" y="576" class="dim">reached      PreToolUse [Write|Edit|MultiEdit]: python3 dem…</text>
@@ -42,4 +43,5 @@
   <text x="24" y="744" class="dim">unreachable  Notification: python3 demo/hooks/notify.py</text>
   <text x="24" y="772" class="dim">             Codex fires no notification event</text>
   <text x="24" y="800" class="dim">5 routes: 2 reached, 2 unreachable, 1 unaccounted</text>
+  <text x="24" y="828" class="bad">exit 1</text>
 </svg>

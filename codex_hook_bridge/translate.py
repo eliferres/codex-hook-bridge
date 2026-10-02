@@ -454,7 +454,7 @@ def _questions(tool_input: dict) -> dict:
 def connector_name(tool: str) -> str:
     """Codex app connectors appear as `mcp__codex_apps__<app>__<leaf>` in hook
     payloads and as `mcp__codex_apps__<app>_<leaf>` in session logs. Both come
-    out in the double-underscore form, the shape Claude Code gives MCP tools,
+    out in the `__` form, the shape Claude Code gives MCP tools,
     so one matcher covers both. The app is the longest known prefix."""
     prefix = "mcp__codex_apps__"
     rest = tool[len(prefix):]

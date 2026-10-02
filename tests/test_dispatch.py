@@ -73,7 +73,8 @@ class Dispatch(unittest.TestCase):
     def test_a_patch_is_judged_file_by_file(self) -> None:
         guard = route("PreToolUse", "Write", "write", "allow")
         run_hook(pre("apply_patch", {"command": PATCH_TWO_FILES}), [guard])
-        self.assertEqual([p["tool_input"]["file_path"] for p in self.seen("write")],
+        # the hooks run in parallel, so they record in no fixed order
+        self.assertEqual(sorted(p["tool_input"]["file_path"] for p in self.seen("write")),
                          ["/work/app/a.txt", "/work/app/secrets/.env"])
 
     def test_a_match_all_hook_runs_once_per_codex_call_not_once_per_file(self) -> None:

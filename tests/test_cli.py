@@ -88,6 +88,28 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(len(proc.stderr.splitlines()), 1)
         self.assertIn("is not valid JSON", proc.stderr)
 
+    def test_odd_tool_inputs_never_produce_a_traceback(self) -> None:
+        for tool_input in ({"open": ["https://example.com"]}, {"search_query": "plain"}):
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "web_search", "tool_input": tool_input}
+            proc = cli(["hook", "--settings", self.settings], json.dumps(payload))
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertEqual(proc.returncode, 0)
+        payload = {"hook_event_name": "PreToolUse", "tool_name": "request_user_input",
+                   "tool_input": {"questions": [{"question": "q", "options": 5}]}}
+        proc = cli(["hook", "--settings", self.settings], json.dumps(payload))
+        self.assertEqual((proc.returncode, proc.stderr), (0, ""))
+
+    def test_an_unexpected_error_in_hook_mode_is_one_line_and_exit_1(self) -> None:
+        import io
+        from unittest import mock
+        from codex_hook_bridge import cli as cli_module
+        err = io.StringIO()
+        with mock.patch.object(cli_module, "run_hook", side_effect=RuntimeError("boom")), \
+                mock.patch("sys.stdin", io.StringIO('{"hook_event_name": "Stop"}')), mock.patch("sys.stderr", err):
+            code = cli_module.main(["hook", "--settings", self.settings])
+        self.assertEqual(code, 1)
+        self.assertEqual(err.getvalue(), "codex-hook-bridge: internal error: RuntimeError: boom\n")
+
     def test_translate_prints_one_line_per_payload(self) -> None:
         payload = {"tool_name": "Bash", "cwd": "/work/app", "tool_input": {"command": "echo hi > a.txt"}}
         proc = cli(["translate"], json.dumps(payload))

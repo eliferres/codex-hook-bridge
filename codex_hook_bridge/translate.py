@@ -423,7 +423,9 @@ def _text(value: object) -> str:
 
 
 def _list(value: object) -> list:
-    return value if isinstance(value, list) else [value] if isinstance(value, dict) else []
+    """A list of the dicts and strings in `value`; anything else is dropped, never raised on."""
+    items = value if isinstance(value, list) else [value]
+    return [v for v in items if isinstance(v, (dict, str))]
 
 
 def _command(tool_input: dict) -> str:
@@ -438,11 +440,11 @@ def _command(tool_input: dict) -> str:
 
 def _questions(tool_input: dict) -> dict:
     out = []
-    for q in tool_input.get("questions") or []:
+    for q in _list(tool_input.get("questions")):
         if not isinstance(q, dict):
             continue
         options = []
-        for o in q.get("options") or []:
+        for o in _list(q.get("options")):
             if isinstance(o, str):
                 options.append({"label": o, "description": ""})
             elif isinstance(o, dict):
@@ -493,7 +495,7 @@ def calls(tool: str, tool_input: dict, cwd: str) -> List[Call]:
         if queries:
             out.append(("WebSearch", {"query": " | ".join(map(str, queries))}, ""))
         for o in _list(tool_input.get("open")):
-            ref = str(o.get("ref_id") or "")
+            ref = o if isinstance(o, str) else str(o.get("ref_id") or "")
             if ref.startswith("http"):
                 out.append(("WebFetch", {"url": ref, "prompt": ""}, ""))
         return out or [("WebSearch", {"query": ""}, "")]

@@ -143,3 +143,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         # broken setup must not look like a hook's decision: hook mode exits 1,
         # which Codex reports as a failed hook and does not act on.
         return 1 if args.command == "hook" else 2
+    except Exception as exc:   # never a traceback: under Codex one line is all that is read
+        sys.stderr.write("%s: internal error: %s: %s\n" % (PROG, type(exc).__name__, exc))
+        return 1 if args.command == "hook" else 2

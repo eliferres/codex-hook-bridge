@@ -64,10 +64,10 @@ def jobs_for(event: str, payload: dict, routes: List[Route]) -> List[Job]:
     """Each (Claude-shaped payload, route) pair to run for one Codex call.
 
     A tool call is translated first and each translated payload meets the
-    routes whose matcher selects its tool name. A handler that matches every
-    tool runs once per Codex call, on the first payload, rather than once per
-    file a patch touches. The same handler never runs twice on one payload,
-    which is how Claude Code treats a handler defined in two settings files.
+    routes whose matcher selects its tool name, a match-all matcher included,
+    so every file a patch touches is judged. The same handler never runs
+    twice on one payload, which is how Claude Code treats a handler defined
+    in two settings files.
     """
     routes = [r for r in routes if r.event == event]
     field = BRIDGED_EVENTS.get(event)
@@ -83,8 +83,7 @@ def jobs_for(event: str, payload: dict, routes: List[Route]) -> List[Job]:
     out, seen = [], set()
     for index, p in enumerate(translate(payload)):
         for r in routes:
-            universal = r.matcher in ("", "*")
-            key = (None if universal else index, handler_key(r.handler))
+            key = (index, handler_key(r.handler))
             if key in seen or not matcher_fits(r.matcher, str(p.get("tool_name") or "")):
                 continue
             seen.add(key)

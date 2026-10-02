@@ -77,9 +77,13 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(sorted(p["tool_input"]["file_path"] for p in self.seen("write")),
                          ["/work/app/a.txt", "/work/app/secrets/.env"])
 
-    def test_a_match_all_hook_runs_once_per_codex_call_not_once_per_file(self) -> None:
-        run_hook(pre("apply_patch", {"command": PATCH_TWO_FILES}), [route("PreToolUse", "*", "every")])
-        self.assertEqual(len(self.seen("every")), 1)
+    def test_a_match_all_hook_judges_every_file_of_a_patch(self) -> None:
+        for matcher in ("*", ""):
+            with self.subTest(matcher=matcher):
+                tag = "every" + ("star" if matcher else "empty")
+                run_hook(pre("apply_patch", {"command": PATCH_TWO_FILES}), [route("PreToolUse", matcher, tag)])
+                self.assertEqual(sorted(p["tool_input"]["file_path"] for p in self.seen(tag)),
+                                 ["/work/app/a.txt", "/work/app/secrets/.env"])
 
     def test_the_same_handler_from_two_files_runs_once(self) -> None:
         twin = route("PreToolUse", "Bash", "twin")

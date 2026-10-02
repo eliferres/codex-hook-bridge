@@ -150,10 +150,11 @@ because there is nothing to stop.
 not support it for hooks, so a hook that wants a human in the loop gets a
 refusal that says so, rather than a silent pass.
 
-**A hook that matches every tool runs once per Codex call**, on the first
-translated payload, not once per file of a patch. A hook matched by name runs
-once per payload it matches. The same handler defined in two settings files
-runs once, as in Claude Code.
+**Every hook runs once per translated payload it matches**, a `*` or empty
+matcher included, so a patch that touches three files is judged three times
+by a hook that matches every tool. Only an exact duplicate goes: the same
+handler defined in two settings files runs once per payload, as in Claude
+Code.
 
 **Matchers follow Claude Code's rule exactly**: empty or `*` matches all; a
 matcher of only letters, digits, `_`, `-`, spaces, commas and `|` is a list

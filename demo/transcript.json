@@ -1,0 +1,22 @@
+[
+  {
+    "cmd": "python3 -m codex_hook_bridge translate < demo/payloads/patch.json",
+    "out": "Edit       /work/app/src/config.py\nWrite      /work/app/.env",
+    "status": 0
+  },
+  {
+    "cmd": "python3 -m codex_hook_bridge hook --settings demo/settings.json < demo/payloads/patch.json; echo \"exit $?\"",
+    "out": "/work/app/.env holds secrets; edit it by hand\nexit 2",
+    "status": 0
+  },
+  {
+    "cmd": "python3 -m codex_hook_bridge hook --settings demo/settings.json < demo/payloads/publish.json; echo \"exit $?\"",
+    "out": "publishing is done by the release workflow, not by hand\nexit 2",
+    "status": 0
+  },
+  {
+    "cmd": "python3 -m codex_hook_bridge parity --settings demo/settings.json",
+    "out": "reached      PreToolUse [Bash]: python3 demo/hooks/no_publish.py\n             via Bash\nreached      PreToolUse [Write|Edit|MultiEdit]: python3 demo/hooks/protect_env.py\n             via Write, Edit, MultiEdit\nunreachable  PreToolUse [Grep]: python3 demo/hooks/search_log.py\n             Codex searches through its shell, so a search reaches Bash hooks instead\nUNACCOUNTED  PreToolUse [Deploy]: python3 demo/hooks/deploy_window.py\n             matches no tool a Codex call is translated to\nunreachable  Notification: python3 demo/hooks/notify.py\n             Codex fires no notification event\n5 routes: 2 reached, 2 unreachable, 1 unaccounted",
+    "status": 1
+  }
+]

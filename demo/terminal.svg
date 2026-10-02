@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 828" role="img" aria-labelledby="t d" font-family="SF Mono, Menlo, Consolas, monospace" font-size="16">
+  <title id="t">codex-hook-bridge demo terminal</title>
+  <desc id="d">Terminal session showing codex-hook-bridge splitting a Codex patch into one Edit and one Write, refusing that patch because a Claude Code hook denies the .env write, refusing a publish command through an exit-2 hook, and ending on a parity report of five routes with one unaccounted, exit 1.</desc>
+  <style>
+    .p { fill: #7ee2a8; }
+    .cmd { fill: #e8eef5; }
+    .dim { fill: #9fb0c0; }
+    .bad { fill: #ff9494; }
+    .good { fill: #7ee2a8; }
+  </style>
+  <rect width="660" height="828" rx="14" fill="#0b0f14"/>
+  <rect width="660" height="40" rx="14" fill="#11161d"/>
+  <rect y="26" width="660" height="14" fill="#11161d"/>
+  <circle cx="26" cy="20" r="6" fill="#ff5f57"/>
+  <circle cx="48" cy="20" r="6" fill="#febc2e"/>
+  <circle cx="70" cy="20" r="6" fill="#28c840"/>
+  <text x="92" y="26" class="dim" font-size="14">codex-hook-bridge</text>
+  <text x="24" y="72"><tspan class="p">$</tspan><tspan class="cmd" dx="8">python3 -m codex_hook_bridge translate &lt; \</tspan></text>
+  <text x="24" y="100" class="cmd">    demo/payloads/patch.json</text>
+  <text x="24" y="128" class="dim">Edit       /work/app/src/config.py</text>
+  <text x="24" y="156" class="dim">Write      /work/app/.env</text>
+  <text x="24" y="184"><tspan class="p">$</tspan><tspan class="cmd" dx="8">python3 -m codex_hook_bridge hook --settings \</tspan></text>
+  <text x="24" y="212" class="cmd">    demo/settings.json &lt; demo/payloads/patch.json; echo &quot;exit \</text>
+  <text x="24" y="240" class="cmd">    $?&quot;</text>
+  <text x="24" y="268" class="dim">/work/app/.env holds secrets; edit it by hand</text>
+  <text x="24" y="296" class="dim">exit 2</text>
+  <text x="24" y="324"><tspan class="p">$</tspan><tspan class="cmd" dx="8">python3 -m codex_hook_bridge hook --settings \</tspan></text>
+  <text x="24" y="352" class="cmd">    demo/settings.json &lt; demo/payloads/publish.json; echo \</text>
+  <text x="24" y="380" class="cmd">    &quot;exit $?&quot;</text>
+  <text x="24" y="408" class="dim">publishing is done by the release workflow, not by hand</text>
+  <text x="24" y="436" class="dim">exit 2</text>
+  <text x="24" y="464"><tspan class="p">$</tspan><tspan class="cmd" dx="8">python3 -m codex_hook_bridge parity --settings \</tspan></text>
+  <text x="24" y="492" class="cmd">    demo/settings.json</text>
+  <text x="24" y="520" class="dim">reached      PreToolUse [Bash]: python3 demo/hooks/no_publi…</text>
+  <text x="24" y="548" class="dim">             via Bash</text>
+  <text x="24" y="576" class="dim">reached      PreToolUse [Write|Edit|MultiEdit]: python3 dem…</text>
+  <text x="24" y="604" class="dim">             via Write, Edit, MultiEdit</text>
+  <text x="24" y="632" class="dim">unreachable  PreToolUse [Grep]: python3 demo/hooks/search_l…</text>
+  <text x="24" y="660" class="dim">             Codex searches through its shell, so a search…</text>
+  <text x="24" y="688" class="dim">UNACCOUNTED  PreToolUse [Deploy]: python3 demo/hooks/deploy…</text>
+  <text x="24" y="716" class="dim">             matches no tool a Codex call is translated to</text>
+  <text x="24" y="744" class="dim">unreachable  Notification: python3 demo/hooks/notify.py</text>
+  <text x="24" y="772" class="dim">             Codex fires no notification event</text>
+  <text x="24" y="800" class="dim">5 routes: 2 reached, 2 unreachable, 1 unaccounted</text>
+</svg>

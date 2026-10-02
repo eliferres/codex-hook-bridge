@@ -1,0 +1,12 @@
+{
+  "session_id": "demo-session",
+  "transcript_path": null,
+  "cwd": "/work/app",
+  "hook_event_name": "PreToolUse",
+  "turn_id": "turn-1",
+  "tool_use_id": "call-1",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: src/config.py\n@@\n-DEBUG = True\n+DEBUG = False\n*** Add File: .env\n+API_KEY=changeme\n*** End Patch"
+  }
+}

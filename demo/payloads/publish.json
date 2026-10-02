@@ -1,0 +1,12 @@
+{
+  "session_id": "demo-session",
+  "transcript_path": null,
+  "cwd": "/work/app",
+  "hook_event_name": "PreToolUse",
+  "turn_id": "turn-1",
+  "tool_use_id": "call-1",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm publish --access public"
+  }
+}

@@ -149,6 +149,13 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(reply.exit_code, 0)
         self.assertIn("timed out", reply.stderr)
 
+    def test_many_slow_hooks_do_not_starve_a_fast_guard_of_its_turn(self) -> None:
+        slow = [route("PreToolUse", "Bash", "slow%d" % i, "sleep") for i in range(20)]
+        guard = route("PreToolUse", "Bash", "guard", "exit2")
+        reply = run_hook(pre("Bash", {"command": "ls"}), slow + [guard], budget=2)
+        self.assertEqual(reply.exit_code, 2)
+        self.assertIn("refused by guard", reply.stderr)
+
     def test_one_refusal_among_several_hooks_refuses_the_call(self) -> None:
         routes = [route("PreToolUse", "Bash", "a", "context"), route("PreToolUse", "Bash", "b", "exit2")]
         reply = run_hook(pre("Bash", {"command": "ls"}), routes)

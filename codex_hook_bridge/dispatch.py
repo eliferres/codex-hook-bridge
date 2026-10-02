@@ -238,7 +238,8 @@ def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
 
     runnable = [j for j in jobs if j.route.handler.get("type", "command") == "command"
                 and j.route.handler.get("command")]
-    with ThreadPoolExecutor(max_workers=max(1, min(16, len(runnable)))) as pool:
+    # One worker per hook: a cap would let slow hooks hold a fast guard past the budget.
+    with ThreadPoolExecutor(max_workers=max(1, len(runnable))) as pool:
         results = list(pool.map(run, runnable))
 
     stops, blocks, contexts, messages, notices = [], [], [], [], []

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-hook-bridge"
+dynamic = ["version"]
+description = "Run your Claude Code hooks under the OpenAI Codex CLI without rewriting them"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Eli Ferres" }]
+
+[project.urls]
+Source = "https://github.com/eliferres/codex-hook-bridge"
+Changelog = "https://github.com/eliferres/codex-hook-bridge/blob/main/CHANGELOG.md"
+
+[project.scripts]
+codex-hook-bridge = "codex_hook_bridge:main"
+
+[tool.setuptools]
+packages = ["codex_hook_bridge"]
+
+[tool.setuptools.dynamic]
+version = { attr = "codex_hook_bridge.__version__" }

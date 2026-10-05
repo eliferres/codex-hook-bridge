@@ -887,6 +887,10 @@ def translate(payload: dict) -> List[dict]:
     if not isinstance(tool_input, dict):
         tool_input = {}
     cwd = str(payload.get("cwd") or tool_input.get("workdir") or tool_input.get("cwd") or "")
+    action = tool_input.get("action")
+    if isinstance(action, dict) and action.get("working_directory"):
+        # local_shell runs its command there, not necessarily in the session folder
+        cwd = absolute(str(action["working_directory"]), cwd)
     base = {k: v for k, v in payload.items() if k not in ("tool_name", "tool_input")}
     out = []
     for name, translated_input, tag in calls(tool, tool_input, cwd):

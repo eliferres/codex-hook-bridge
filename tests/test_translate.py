@@ -190,6 +190,13 @@ class ShellWrites(unittest.TestCase):
                 self.assertEqual(names(out), [("Bash", "bash -lc 'cd /secret && echo x > .env'"),
                                               ("Write", "/secret/.env")])
 
+    def test_local_shell_runs_in_its_action_working_directory(self) -> None:
+        for workdir, expected in (("/secret", "/secret/.env"), ("sub", "/work/app/sub/.env")):
+            with self.subTest(workdir=workdir):
+                out = translate(codex("local_shell", {"action": {"type": "exec", "working_directory": workdir,
+                                                                 "command": ["bash", "-lc", "echo x > .env"]}}))
+                self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], [expected])
+
     def test_a_redirect_is_also_a_write_to_its_target(self) -> None:
         out = translate(codex("Bash", {"command": "echo hi > notes.md"}))
         self.assertEqual(names(out), [("Bash", "echo hi > notes.md"), ("Write", "/work/app/notes.md")])

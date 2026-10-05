@@ -249,7 +249,7 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   no faithful way to map an edited `Write` back into an `apply_patch` body.
 - **Shell write detection is a reading of the command text**, not a sandbox.
   It knows redirects and the common writers (`cp`, `mv`, `tee`, `sed -i`,
-  `perl -i`, `dd`, `curl -o`, `wget -O`, `tar -C`, `unzip -d`,
+  `perl -i`, `dd`, `curl -o/-O/-D/-c`, `wget -O/-o/-a`, `tar -C`, `unzip -d`,
   `git checkout --`, `git restore` and more), in clustered spellings such as
   `curl -sSo` (the folder of `tar -C` and `unzip -d` is reported with and
   without a trailing slash), behind wrappers and keywords (`sudo`, `stdbuf`, `do`, `!`), and

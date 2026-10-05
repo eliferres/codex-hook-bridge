@@ -23,6 +23,7 @@ import functools
 import os
 import re
 import shlex
+import urllib.parse
 from typing import Callable, Iterator, List, NamedTuple, Optional, Tuple
 
 # Every Claude Code tool name a translation can produce. Parity uses this set
@@ -270,12 +271,12 @@ REDIRECT_WORD_RX = re.compile(r"""[ \t]*((?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"
 SEGMENT_RX = re.compile(r"[;&|\n()`]+")   # a subshell or $( ... ) is a command of its own
 SOURCE_MAX = 200_000   # bytes read from a copy's source file to show what it writes
 INPLACE_PROGS = ("sed", "gsed", "perl", "ruby")
-# program: (its short options that take a value, the one naming the output, its long form)
+# program: (its short options that take a value, the options naming a file or folder it writes)
 OUTPUT_OPTIONS = {
-    "curl": ("AbcCdDeEFHKmoPQrtTuUwxXyYz", "o", "--output"),
-    "wget": ("aABDeiIlnoOPQRtTUwX", "O", "--output-document"),
-    "tar": ("bCfFgHKLNTVX", "C", "--directory"),
-    "unzip": ("dP", "d", ""),
+    "curl": ("AbcCdDeEFHKmoPQrtTuUwxXyYz", ("-o", "--output", "-D", "--dump-header", "-c", "--cookie-jar")),
+    "wget": ("aABDeiIlnoOPQRtTUwX", ("-O", "--output-document", "-o", "--output-file", "-a", "--append-output")),
+    "tar": ("bCfFgHKLNTVX", ("-C", "--directory")),
+    "unzip": ("dP", ("-d",)),
 }
 WRAPPERS = ("sudo", "env", "command", "nohup", "time", "timeout", "nice", "exec", "xargs", "doas", "stdbuf")
 KEYWORDS = ("!", "{", "do", "then", "else", "elif", "if", "while", "until")   # come before a command
@@ -511,30 +512,33 @@ def unwrap(words: List[str]) -> List[str]:
     return words
 
 
-def option_values(words: List[str], takes_value: str, short: str, long: str) -> List[str]:
-    """The values given to one option however it is spelled: `-o F`, `-oF`,
-    `-sSo F` (the last of a cluster of short options), `--output F` and
-    `--output=F`. `takes_value` names the program's short options that take a
-    value, so that in `-dfoo` the `o` is read as part of -d's value."""
-    out, i = [], 1
+def read_options(words: List[str], takes_value: str, long_values: Tuple[str, ...] = ()) -> List[Tuple[str, Optional[str]]]:
+    """(option, value or None for a flag) for every option before `--`, however
+    it is spelled: `-o F`, `-oF`, `-sSo F` (a cluster of short options, the
+    last taking a value), `--output F` and `--output=F`. `takes_value` names
+    the program's short options that take a value, so that in `-dfoo` the `o`
+    is part of -d's value; `long_values` the long ones whose value is the next word."""
+    out: List[Tuple[str, Optional[str]]] = []
+    i = 1
     while i < len(words) and words[i] != "--":
         w = words[i]
-        if long and (w == long or w.startswith(long + "=")):
-            if "=" in w:
-                out.append(w.split("=", 1)[1])
-            elif i + 1 < len(words):
+        if w.startswith("--"):
+            name, eq, value = w.partition("=")
+            if not eq and name in long_values and i + 1 < len(words):
                 i += 1
-                out.append(words[i])
-        elif w.startswith("-") and not w.startswith("--"):
+                value, eq = words[i], "="
+            out.append((name, value if eq else None))
+        elif w.startswith("-") and len(w) > 1:
             for k, letter in enumerate(w[1:], 2):
-                if letter in takes_value:
-                    value = w[k:]
-                    if not value and i + 1 < len(words):
-                        i += 1
-                        value = words[i]
-                    if letter == short:
-                        out.append(value)
-                    break
+                if letter not in takes_value:
+                    out.append(("-" + letter, None))
+                    continue
+                value = w[k:]
+                if not value and i + 1 < len(words):
+                    i += 1
+                    value = words[i]
+                out.append(("-" + letter, value))
+                break
         i += 1
     return out
 
@@ -602,7 +606,13 @@ def _written(prog: str, words: List[str]) -> List[str]:
     if prog == "dd":
         return [w[3:] for w in words[1:] if w.startswith("of=")]
     if prog in OUTPUT_OPTIONS:
-        values = option_values(words, *OUTPUT_OPTIONS[prog])
+        takes_value, outputs = OUTPUT_OPTIONS[prog]
+        options = read_options(words, takes_value, tuple(o for o in outputs if o.startswith("--")))
+        values = [value for name, value in options if name in outputs and value is not None]
+        if prog == "curl" and any(name in ("-O", "--remote-name") for name, _ in options):
+            # each URL is saved in the folder under the last segment of its path
+            values += [os.path.basename(urllib.parse.urlsplit(w).path) for w in words[1:]
+                       if "://" in w and not w.startswith("-")]
         if prog in ("tar", "unzip"):
             # a folder the archive's files land in: with and without the slash,
             # so a guard written either way (`secret`, `secret/`) matches

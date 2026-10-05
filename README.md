@@ -73,7 +73,7 @@ event. Tool events are translated first; each row below is one translation.
 
 | Codex call | Claude Code payload(s) | Why |
 |---|---|---|
-| shell (`Bash`, `exec_command`, `shell`, `local_shell`) | `Bash` with the command, plus one `Write` per file the command writes | On Codex the shell is a file-writing tool too: `sed -i`, `>`, `tee`, `cp`, `curl -o` and the rest should meet the hooks that guard paths |
+| shell (`Bash`, `exec_command`, `shell`, `local_shell`) | `Bash` with the command, plus one `Write` per file the command writes (an `Edit` with no content for each path `git restore` puts back) | On Codex the shell is a file-writing tool too: `sed -i`, `>`, `tee`, `cp`, `curl -o` and the rest should meet the hooks that guard paths |
 | `apply_patch` | one `Write` per added file, `Edit` per hunk of an updated file, `Bash` `rm` per deleted file, `Bash` `mv` per rename; a body under a field the bridge does not read passes through as `apply_patch` | A patch touches many files at once; Claude Code's file hooks judge one file per call |
 | code mode (`exec`) | the nested `tools.exec_command` and `tools.apply_patch` calls as above, plus a `Write` per `fs.writeFile` | The script's acts, not the script, are what a hook can judge |
 | `view_image` | `Read` | Same act, same path checks |
@@ -184,8 +184,9 @@ something to read.
 **A command too long to read in time is refused.** Reading a command takes
 time in proportion to its length, about a second or two per million
 characters, and that time comes out of the same budget the hooks run in. A
-shell command over 1,000,000 characters, or one whose `cd`s lead to a folder
-path over 4,096 characters, is refused with exit 2 and a one-line reason
+shell command over 1,000,000 characters, one whose `cd`s lead to a folder
+path over 4,096 characters, or one that nests `bash -c` or `eval` more than
+16 deep, is refused with exit 2 and a one-line reason
 when any hook is set for that event, rather than let through unread. Split
 such a command into shorter ones.
 
@@ -240,8 +241,11 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   no faithful way to map an edited `Write` back into an `apply_patch` body.
 - **Shell write detection is a reading of the command text**, not a sandbox.
   It knows redirects and the common writers (`cp`, `mv`, `tee`, `sed -i`,
-  `perl -i`, `dd`, `curl -o`, `tar -C`, `git checkout --` and more); a write
-  done by a script the command runs is invisible to it.
+  `perl -i`, `dd`, `curl -o`, `wget -O`, `tar -C`, `unzip -d`,
+  `git checkout --`, `git restore` and more), in clustered spellings such as
+  `curl -sSo`, behind wrappers and keywords (`sudo`, `stdbuf`, `do`, `!`), and
+  inside `bash -c`, `eval` and `$( ... )`; a write done by a script the
+  command runs is invisible to it.
 - **Relative shell writes resolve against the session folder.** Codex's
   `exec_command` hook payload carries no `workdir`, so a command run in a
   subfolder that writes `notes.txt` is reported as the session folder's

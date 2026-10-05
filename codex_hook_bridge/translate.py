@@ -40,6 +40,7 @@ Call = Tuple[str, dict, str]   # (Claude tool name, tool_input, derivation tag o
 # long to read in time is refused, never let through unread.
 COMMAND_MAX = 1_000_000
 FOLDER_MAX = 4096   # a cd into a longer path is not followed, and the command is refused
+NEST_MAX = 16       # bash -c and eval inside one another; deeper is refused
 
 
 class Untranslatable(Exception):
@@ -177,7 +178,8 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 # body is not one: a parenthesis, or a cd at the start of a simple command,
 # past its -L/-P options and `--`. A cd with no folder goes home.
 FOLDER_RX = re.compile(
-    r"[()]|(?:^|(?<=[;&|\n(]))[ \t]*cd(?:[ \t]+-[LPe@]+)*(?:[ \t]+--)?"
+    r"[()]|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
+    r"cd(?:[ \t]+-[LPe@]+)*(?:[ \t]+--)?"
     r"(?:[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
 
 
@@ -252,13 +254,19 @@ END_PATCH_RX = re.compile(r"^[^\S\n]*\*\*\* End Patch[^\S\n]*$", re.M)
 REDIRECT_OP_RX = re.compile(r"(?:\d|&)?>>?\|?")
 # The word after a redirect, quotes included, up to where the shell would end it.
 REDIRECT_WORD_RX = re.compile(r"""[ \t]*((?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"\\;&|<>()])*)""")
-SEGMENT_RX = re.compile(r"[;&|\n]+")
+SEGMENT_RX = re.compile(r"[;&|\n()`]+")   # a subshell or $( ... ) is a command of its own
 SOURCE_MAX = 200_000   # bytes read from a copy's source file to show what it writes
 INPLACE_PROGS = ("sed", "gsed", "perl", "ruby")
-OUTPUT_OPTIONS = {"curl": ("-o", "--output"), "wget": ("-O", "--output-document"),
-                  "tar": ("-C", "--directory"), "unzip": ("-d",)}
-WRAPPERS = ("sudo", "env", "command", "nohup", "time", "timeout", "nice", "exec", "xargs", "doas")
-SHELLS = ("bash", "sh", "zsh", "dash")
+# program: (its short options that take a value, the one naming the output, its long form)
+OUTPUT_OPTIONS = {
+    "curl": ("AbcCdDeEFHKmoPQrtTuUwxXyYz", "o", "--output"),
+    "wget": ("aABDeiIlnoOPQRtTUwX", "O", "--output-document"),
+    "tar": ("bCfFgHKLNTVX", "C", "--directory"),
+    "unzip": ("dP", "d", ""),
+}
+WRAPPERS = ("sudo", "env", "command", "nohup", "time", "timeout", "nice", "exec", "xargs", "doas", "stdbuf")
+KEYWORDS = ("!", "{", "do", "then", "else", "elif", "if", "while", "until")   # come before a command
+SHELLS = ("bash", "sh", "zsh", "dash", "ksh")
 
 
 class Scan(NamedTuple):
@@ -413,10 +421,7 @@ def _segments(command: str, masked: str = "") -> Iterator[Tuple[List[str], int]]
     masked = masked or mask(command)
     cuts = [0] + [m.end() for m in SEGMENT_RX.finditer(masked)] + [len(command)]
     for i in range(len(cuts) - 1):
-        words = _words(command[cuts[i]:cuts[i + 1]].rstrip(";&|\n"))
-        # a subshell's parentheses are not part of the program or file names
-        words = [w for w in (w.lstrip("(") if j == 0 else w for j, w in enumerate(words)) if w]
-        words = [w.rstrip(")") or w for w in words]
+        words = _words(command[cuts[i]:cuts[i + 1]].rstrip(";&|\n()`"))
         while words and "=" in words[0] and words[0].split("=")[0].isidentifier():
             words = words[1:]   # leading VAR=value assignments
         if words:
@@ -470,13 +475,18 @@ WRAPPER_VALUE_OPTIONS = {
     "time": ("-f", "-o", "--format", "--output"),
     "xargs": ("-I", "-n", "-P", "-d", "-L", "-s", "-E", "-a", "--max-args", "--max-procs",
               "--delimiter", "--arg-file"),
+    "stdbuf": ("-i", "-o", "-e"),
 }
 
 
 def unwrap(words: List[str]) -> List[str]:
-    """`words` with any leading wrappers (sudo, env, timeout, ...) and their
-    own options and values removed, so the first word is the program run."""
-    while words and os.path.basename(words[0]) in WRAPPERS:
+    """`words` with any leading keywords (do, then, !, ...), wrappers (sudo,
+    env, timeout, ...) and the wrappers' own options and values removed, so
+    the first word is the program run."""
+    while words and (words[0] in KEYWORDS or os.path.basename(words[0]) in WRAPPERS):
+        if words[0] in KEYWORDS:
+            words = words[1:]
+            continue
         wrapper = os.path.basename(words[0])
         rest = words[1:]
         while rest and (rest[0].startswith("-") or (wrapper == "env" and "=" in rest[0])):
@@ -488,19 +498,74 @@ def unwrap(words: List[str]) -> List[str]:
     return words
 
 
-def segment_targets(words: List[str], folder: str) -> List[str]:
-    """The files one simple command run in `folder` writes, by what its
-    program is known to write, as written in the command."""
+def option_values(words: List[str], takes_value: str, short: str, long: str) -> List[str]:
+    """The values given to one option however it is spelled: `-o F`, `-oF`,
+    `-sSo F` (the last of a cluster of short options), `--output F` and
+    `--output=F`. `takes_value` names the program's short options that take a
+    value, so that in `-dfoo` the `o` is read as part of -d's value."""
+    out, i = [], 1
+    while i < len(words) and words[i] != "--":
+        w = words[i]
+        if long and (w == long or w.startswith(long + "=")):
+            if "=" in w:
+                out.append(w.split("=", 1)[1])
+            elif i + 1 < len(words):
+                i += 1
+                out.append(words[i])
+        elif w.startswith("-") and not w.startswith("--"):
+            for k, letter in enumerate(w[1:], 2):
+                if letter in takes_value:
+                    value = w[k:]
+                    if not value and i + 1 < len(words):
+                        i += 1
+                        value = words[i]
+                    if letter == short:
+                        out.append(value)
+                    break
+        i += 1
+    return out
+
+
+def restored_paths(words: List[str]) -> List[str]:
+    """The paths `git restore` puts back: its operands, past its options and -s's value."""
+    paths, i = [], 2
+    while i < len(words):
+        w = words[i]
+        if w == "--":
+            return paths + words[i + 1:]
+        if w in ("-s", "--source"):
+            i += 1
+        elif not w.startswith("-"):
+            paths.append(w)
+        i += 1
+    return paths
+
+
+def segment_targets(words: List[str], folder: str, depth: int = 0) -> List[Tuple[str, str]]:
+    """(Write or Edit, file) for each file one simple command run in `folder`
+    writes, by what its program is known to write, the file as written in
+    the command. `depth` counts the bash -c and eval levels around it."""
     words = unwrap(words)
     if not words:
         return []
     prog = os.path.basename(words[0])
     if prog in SHELLS:
-        # -c alone or combined with other flags (-lc, -ec): the next word is the command
-        flag = next((i for i, w in enumerate(words[1:-1], 1)
+        # -c alone or combined with other flags (-lc, -ec): the next word, past any --, is the command
+        flag = next((i for i, w in enumerate(words[1:], 1)
                      if w.startswith("-") and not w.startswith("--") and "c" in w[1:]), None)
-        if flag is not None:
-            return shell_targets(words[flag + 1], folder)   # absolute already, so they resolve to themselves
+        script = words[flag + 1:] if flag is not None else []
+        script = script[1:] if script[:1] == ["--"] else script
+        if script:
+            return shell_targets(script[0], folder, depth + 1)   # absolute already, so they resolve to themselves
+    if prog == "eval":
+        return shell_targets(" ".join(words[1:]), folder, depth + 1)
+    if prog == "git" and len(words) > 2 and words[1] == "restore":
+        return [("Edit", p) for p in restored_paths(words)]
+    return [("Write", p) for p in _written(prog, words)]
+
+
+def _written(prog: str, words: List[str]) -> List[str]:
+    """The files a program that is not a shell writes, read from its arguments."""
     operands = [w for w in words[1:] if not w.startswith("-")]
     if prog in INPLACE_PROGS:
         return inplace_files(words)
@@ -523,35 +588,33 @@ def segment_targets(words: List[str], folder: str) -> List[str]:
     if prog == "dd":
         return [w[3:] for w in words[1:] if w.startswith("of=")]
     if prog in OUTPUT_OPTIONS:
-        out = []
-        for i, w in enumerate(words):
-            for opt in OUTPUT_OPTIONS[prog]:
-                if w == opt and i + 1 < len(words):
-                    out.append(words[i + 1])
-                elif w.startswith(opt + "="):
-                    out.append(w.split("=", 1)[1])
-        return out
-    if prog == "git" and len(words) > 2 and words[1] in ("checkout", "restore") and "--" in words:
+        return option_values(words, *OUTPUT_OPTIONS[prog])
+    if prog == "git" and len(words) > 2 and words[1] == "checkout" and "--" in words:
         return words[words.index("--") + 1:]
     return []
 
 
 def _resolve(name: str, folder: str) -> str:
-    """A written file's absolute path, or "" for a target that is not a file (/dev/*, &2)."""
-    if not name or name.startswith(("/dev/", "&")):
+    """A written file's absolute path, or "" for a target that is not a file (/dev/*, &2, - for stdout)."""
+    if not name or name == "-" or name.startswith(("/dev/", "&")):
         return ""
     return absolute(expand_home(name), folder)
 
 
-def shell_targets(command: str, cwd: str) -> List[str]:
-    """Every file a shell command writes, as absolute paths in first-seen
-    order, each resolved in the folder its own part of the command runs in."""
+def shell_targets(command: str, cwd: str, depth: int = 0) -> List[Tuple[str, str]]:
+    """(Write or Edit, absolute path) for every file a shell command writes,
+    in first-seen order, each resolved in the folder its own part of the
+    command runs in."""
+    if depth > NEST_MAX:
+        raise Untranslatable("this command nests bash -c or eval more than %d deep, "
+                             "which the bridge does not read" % NEST_MAX)
     masked = mask(command)
     where = folders(command, cwd, masked)
-    found = [_resolve(name, where(offset)) for name, offset in redirect_targets(command, masked)]
+    found = [("Write", _resolve(name, where(offset))) for name, offset in redirect_targets(command, masked)]
     for words, offset in _segments(command, masked):
-        found += [_resolve(name, where(offset)) for name in segment_targets(words, where(offset))]
-    return [p for p in dict.fromkeys(found) if p]
+        found += [(tool, _resolve(name, where(offset)))
+                  for tool, name in segment_targets(words, where(offset), depth)]
+    return [t for t in dict.fromkeys(found) if t[1]]
 
 
 def _read_small(path: str) -> str:
@@ -588,7 +651,10 @@ def shell_write_calls(command: str, cwd: str) -> List[Call]:
         if quoted:
             bodies = ["\n".join(quoted).replace("\\n", "\n")]
     content = "\n".join(bodies)
-    return [("Write", {"file_path": p, "content": content}, "shell-write") for p in targets]
+    # a restore's new content is in git, not in the command, so its Edit carries none
+    return [("Write", {"file_path": p, "content": content}, "shell-write") if tool == "Write" else
+            ("Edit", {"file_path": p, "old_string": "", "new_string": ""}, "shell-edit")
+            for tool, p in targets]
 
 
 # ---------------------------------------------------------------------------

@@ -167,7 +167,7 @@ class ApplyPatch(unittest.TestCase):
 
 def targets(command: str) -> list:
     """The files a command writes, relative to CWD when under it."""
-    return [p[len(CWD) + 1:] if p.startswith(CWD + "/") else p for p in shell_targets(command, CWD)]
+    return [p[len(CWD) + 1:] if p.startswith(CWD + "/") else p for _, p in shell_targets(command, CWD)]
 
 
 class ShellWrites(unittest.TestCase):
@@ -250,6 +250,46 @@ class ShellWrites(unittest.TestCase):
                     out = translate(codex("Bash", {"command": cd + " && echo x > .env" + patch}))
                     self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]],
                                      ["/home/u/proj/.env", "/home/u/proj/p.env"])
+
+    def test_more_writers_and_shell_forms_are_read(self) -> None:
+        cases = {
+            "curl -oattached.html https://x": [("Write", "attached.html")],
+            "curl -sSo cluster.html https://x": [("Write", "cluster.html")],
+            "curl --output long.html https://x": [("Write", "long.html")],
+            "curl -d data -s https://x": [],
+            "wget -qO quiet.html https://x": [("Write", "quiet.html")],
+            "wget -qO- https://x": [],
+            "unzip -ddir a.zip": [("Write", "dir")],
+            "unzip -qd qdir a.zip": [("Write", "qdir")],
+            "bash -c -- 'echo x > dashdash.txt'": [("Write", "dashdash.txt")],
+            "ksh -c 'echo x > ksh.txt'": [("Write", "ksh.txt")],
+            "eval 'echo x > eval.txt'": [("Write", "eval.txt")],
+            "for f in a; do cp a do.txt; done": [("Write", "do.txt")],
+            "! cp a bang.txt": [("Write", "bang.txt")],
+            "if true; then cp a then.txt; fi": [("Write", "then.txt")],
+            "echo $(cp a subst.txt)": [("Write", "subst.txt")],
+            'echo "$(cp a quoted-subst.txt)"': [("Write", "quoted-subst.txt")],
+            "echo `cp a backquote.txt`": [("Write", "backquote.txt")],
+            "stdbuf -oL cp a stdbuf.txt": [("Write", "stdbuf.txt")],
+            "stdbuf -o L tee stdbuf2.txt": [("Write", "stdbuf2.txt")],
+            "git restore .env": [("Edit", ".env")],
+            "git restore --source HEAD~1 -- a.py": [("Edit", "a.py")],
+            "for d in a; do cd /secret; done; echo x > .env": [("Write", "/secret/.env")],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                out = translate(codex("Bash", {"command": command}))
+                self.assertEqual([(p["tool_name"], p["tool_input"]["file_path"]) for p in out[1:]],
+                                 [(tool, os.path.join(CWD, path)) for tool, path in expected])
+
+    def test_a_restore_is_an_edit_whose_content_is_not_known(self) -> None:
+        out = translate(codex("Bash", {"command": "git restore .env"}))
+        self.assertEqual(out[1]["tool_input"], {"file_path": "/work/app/.env", "old_string": "", "new_string": ""})
+        self.assertEqual(out[1]["codex_derived"], "shell-edit")
+
+    def test_commands_nested_past_any_real_use_are_refused_not_passed(self) -> None:
+        with self.assertRaises(Untranslatable):
+            translate(codex("Bash", {"command": "eval " * 100 + "echo x > .env"}))
 
     def test_a_heredoc_write_carries_its_body(self) -> None:
         out = translate(codex("Bash", {"command": "cat > a.txt <<'EOF'\nhello\nEOF"}))

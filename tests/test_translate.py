@@ -362,6 +362,10 @@ class LongCommands(unittest.TestCase):
         with self.assertRaises(Untranslatable):
             translate(codex("Bash", {"command": "x" * (COMMAND_MAX + 1)}))
 
+    def test_cds_that_may_fail_leaving_too_many_possible_folders_are_refused_not_passed(self) -> None:
+        with self.assertRaises(Untranslatable):
+            translate(codex("Bash", {"command": "cd a ; cd .. ; " * 20 + "echo x > .env"}))
+
     def test_a_cd_chain_too_deep_to_follow_is_refused_not_passed(self) -> None:
         with self.assertRaises(Untranslatable):
             translate(codex("Bash", {"command": "cd a && " * 3000 + "echo x > .env"}))

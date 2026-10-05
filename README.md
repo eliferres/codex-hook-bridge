@@ -192,7 +192,8 @@ time in proportion to its length, about a second or two per million
 characters, and that time comes out of the same budget the hooks run in. A
 shell command over 1,000,000 characters, one whose `cd`s lead to a folder
 path over 4,096 characters, or one that nests `bash -c` or `eval` more than
-16 deep, is refused with exit 2 and a one-line reason
+16 deep, or whose `cd`s into folders that may not exist leave more than 16
+folders it could be in, is refused with exit 2 and a one-line reason
 when any hook is set for that event, rather than let through unread. Split
 such a command into shorter ones.
 

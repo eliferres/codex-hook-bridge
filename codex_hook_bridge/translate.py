@@ -42,6 +42,7 @@ Call = Tuple[str, dict, str]   # (Claude tool name, tool_input, derivation tag o
 COMMAND_MAX = 1_000_000
 FOLDER_MAX = 4096   # a cd into a longer path is not followed, and the command is refused
 NEST_MAX = 16       # bash -c and eval inside one another; deeper is refused
+FOLDERS_MAX = 16    # folders the shell may be in after cds that may fail; more is refused
 
 
 class Untranslatable(Exception):
@@ -218,6 +219,9 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
             after = masked[m.end():m.end() + 64].lstrip(" \t")[:1]
             may_fail = after in (";", "\n") and not all(os.path.isdir(f) for f in moved)
             stack[-1] = tuple(dict.fromkeys(moved + stack[-1])) if may_fail else moved
+            if len(stack[-1]) > FOLDERS_MAX:
+                raise Untranslatable("this command's cds into folders that may not exist leave more than %d "
+                                     "folders it could be in, which the bridge does not follow" % FOLDERS_MAX)
         offsets.append(m.end())
         values.append(stack[-1])
     return lambda offset: values[bisect.bisect_right(offsets, offset) - 1]

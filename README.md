@@ -75,7 +75,7 @@ event. Tool events are translated first; each row below is one translation.
 |---|---|---|
 | shell (`Bash`, `exec_command`, `shell`, `local_shell`) | `Bash` with the command, plus one `Write` per file the command writes (an `Edit` with no content for each path `git restore` puts back) | On Codex the shell is a file-writing tool too: `sed -i`, `>`, `tee`, `cp`, `curl -o` and the rest should meet the hooks that guard paths |
 | `apply_patch` | one `Write` per added file, `Edit` per hunk of an updated file, `Bash` `rm` per deleted file, `Bash` `mv` per rename; a body under a field the bridge does not read passes through as `apply_patch` | A patch touches many files at once; Claude Code's file hooks judge one file per call |
-| code mode (`exec`) | the nested `tools.exec_command` and `tools.apply_patch` calls as above, plus a `Write` per `fs.writeFile` | The script's acts, not the script, are what a hook can judge |
+| code mode (`exec`) | each nested `tools.exec_command` and `tools.apply_patch` call whose command or patch is written in the script as a string, as above; a command held in a variable reaches `Bash` as the code that passes it, and a patch held in a variable is not read. Plus a `Write` per `fs.writeFile`, `appendFile` or `createWriteStream`, with a placeholder path when the path is not a string | The script's acts, not the script, are what a hook can judge |
 | `view_image` | `Read` | Same act, same path checks |
 | `web_search` | `WebSearch`, plus `WebFetch` per opened URL | Same act |
 | `request_user_input` | `AskUserQuestion` | Same act |

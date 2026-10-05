@@ -306,7 +306,7 @@ class ShellWrites(unittest.TestCase):
         patch = " && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: p.env\n+K=1\n*** End Patch\nEOF"
         with mock.patch.dict(os.environ, {"HOME": "/home/u"}):
             for cd in ("cd $HOME/proj", "cd ${HOME}/proj", 'cd "$HOME/proj"', "cd ~/proj", "cd && cd proj",
-                       "cd -P $HOME/proj", "cd -- $HOME/proj"):
+                       "cd -L $HOME/proj", "cd -- $HOME/proj"):
                 with self.subTest(cd=cd):
                     out = translate(codex("Bash", {"command": cd + " && echo x > .env" + patch}))
                     self.assertEqual(written_paths(out),

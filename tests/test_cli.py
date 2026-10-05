@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from codex_hook_bridge import __version__
+from codex_hook_bridge.translate import translate
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE = os.path.join(ROOT, "tests", "fixtures", "hook.py")
@@ -241,6 +242,12 @@ class GuardedSession(unittest.TestCase):
                             "cd /tmp && true & echo x > secret/k",
                             "cd /tmp & " + patch,
                             "cd /tmp | true; " + patch)
+
+
+    def test_a_cd_through_a_symlink_climbs_back_by_name_as_bash_does_unless_dash_p(self) -> None:
+        self.assert_refused("cd l2/.. && echo x > secret/k", "cd -L l2/.. && echo x > secret/k")
+        out = translate({"tool_name": "Bash", "cwd": self.app, "tool_input": {"command": "cd -P l2/.. && echo x > k"}})
+        self.assertEqual(out[1]["tool_input"]["file_path"], os.path.join(self.root, "elsewhere", "k"))
 
 
 if __name__ == "__main__":

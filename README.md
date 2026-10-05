@@ -275,7 +275,9 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   next command still runs, so what follows is reported under both folders.
   A `cd` whose folder is only known when it runs (`cd "$PWD"`, `cd -`,
   `cd "$(git rev-parse --show-toplevel)"`) leaves every folder the command
-  has been in, the session folder included, as a place it may be.
+  has been in, the session folder included, as a place it may be. As in
+  bash, `cd` is logical: `cd link/..` climbs back out of the link by name,
+  unless `-P` is given.
 - **Codex reaches only what it hooks.** Codex's documentation says hosted
   tools such as its built-in web search do not pass through hooks, so the
   `web_search` translation applies only where Codex does send the call.

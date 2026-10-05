@@ -184,7 +184,7 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 FOLDER_RX = re.compile(
     r"[()`]|(?P<sep>&&|\|\||(?<![>&|])&(?![>&])|(?<![>|])\||;|\n)"
     r"|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
-    r"cd(?:[ \t]+-[LPe@]+)*(?:[ \t]+--)?"
+    r"cd(?P<options>(?:[ \t]+-[LPe@]+)*)(?:[ \t]+--)?"
     r"(?:[ \t]+(?P<target>'[^']*'|\"[^\"]*\"|`|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
 
 
@@ -234,7 +234,9 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
             level["now"] = tuple(dict.fromkeys(level["now"] + tuple(seen)))
         else:
             target = expand_home(command[m.start("target"):m.end("target")])
-            moved = tuple(dict.fromkeys(absolute(target, f) for f in level["now"]))
+            options = m.group("options").replace("e", "").replace("@", "")
+            physical = options.rfind("P") > options.rfind("L")   # the last of -L and -P wins, -L by default
+            moved = tuple(dict.fromkeys(cd_folder(target, f, physical) for f in level["now"]))
             if any(len(f) > FOLDER_MAX for f in moved):
                 # each cd deeper costs more to follow; past this the path is not a real folder
                 raise Untranslatable("a cd in this command leads to a folder path over %d characters long, "
@@ -251,6 +253,14 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
         offsets.append(m.end())
         values.append(levels[-1]["now"])
     return lambda offset: values[bisect.bisect_right(offsets, offset) - 1]
+
+
+def cd_folder(target: str, folder: str, physical: bool) -> str:
+    """Where `cd target` from `folder` goes. By default bash's cd is logical:
+    `l2/..` climbs back out of the link by name, so the path is tidied as
+    text. With -P it follows the links on disk first."""
+    joined = os.path.join(folder, os.path.expanduser(target.strip().strip("'\"")))
+    return os.path.realpath(joined) if physical else os.path.normpath(joined)
 
 
 def unknown_folder(target: str) -> bool:

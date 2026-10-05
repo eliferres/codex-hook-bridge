@@ -18,10 +18,11 @@ renamed, `codex_derived`, saying how it was derived.
 """
 from __future__ import annotations
 
+import bisect
 import os
 import re
 import shlex
-from typing import Iterator, List, Optional, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple
 
 # Every Claude Code tool name a translation can produce. Parity uses this set
 # to decide whether a hook's matcher can ever be reached from Codex.
@@ -138,7 +139,31 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
     return out
 
 
-CD_RX = re.compile(r"(?:^|[;&|\n(])\s*cd\s+('[^']*'|\"[^\"]*\"|[^\s;&|)]+)")
+# On the masked command (see mask()), so a `cd` inside quotes or a heredoc
+# body is not one: a parenthesis, or a cd at the start of a simple command.
+FOLDER_RX = re.compile(
+    r"[()]|(?:^|(?<=[;&|\n(]))[ \t]*cd[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()]+)", re.M)
+
+
+def folders(command: str, cwd: str) -> Callable[[int], str]:
+    """A function giving the folder the shell is in at each offset of `command`.
+
+    Every `cd` moves it; a cd inside a subshell, `( ... )`, holds only until
+    the subshell's closing parenthesis.
+    """
+    masked = mask(command)
+    stack, offsets, values = [cwd], [0], [cwd]
+    for m in FOLDER_RX.finditer(masked):
+        if m.group() == "(":
+            stack.append(stack[-1])
+        elif m.group() == ")":
+            if len(stack) > 1:   # an unmatched `)` (a case pattern) closes nothing
+                stack.pop()
+        else:
+            stack[-1] = absolute(command[m.start(1):m.end(1)], stack[-1])
+        offsets.append(m.end())
+        values.append(stack[-1])
+    return lambda offset: values[bisect.bisect_right(offsets, offset) - 1]
 
 
 def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
@@ -147,17 +172,21 @@ def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
 
     A body ends at the first line whose trimmed text is the end marker, as
     in Codex; the marker appearing inside a line of content does not end it.
-    A `cd <dir>` earlier in the command (Codex's own `cd <dir> && apply_patch`
-    form included) moves the folder for every patch after it.
+    A patch resolves in the folder its command runs in: after any `cd` before
+    it (Codex's own `cd <dir> && apply_patch` form included), and for a
+    heredoc, at the `<<` that opens it rather than where its body sits.
     """
     found: List[Tuple[str, str]] = []
-    folder, done = cwd, 0
+    where = folders(command, cwd)
+    bodies = heredocs(command)
+    body_starts = [body_start for _, body_start, _ in bodies]
+    done = 0
     while True:
         start = command.find("*** Begin Patch", done)
         if start < 0:
             return found
-        for m in CD_RX.finditer(command[done:start]):
-            folder = absolute(m.group(1), folder)
+        k = bisect.bisect_right(body_starts, start) - 1
+        opened_at = bodies[k][0] if k >= 0 and start <= bodies[k][2] else start
         end = len(command)
         offset = start
         for line in command[start:].split("\n"):
@@ -165,7 +194,7 @@ def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
             if line.strip() == "*** End Patch":
                 end = offset - 1
                 break
-        found.append((command[start:end], folder))
+        found.append((command[start:end], where(opened_at)))
         done = end
 
 
@@ -190,11 +219,16 @@ WRAPPERS = ("sudo", "env", "command", "nohup", "time", "timeout", "nice", "exec"
 SHELLS = ("bash", "sh", "zsh", "dash")
 
 
+def heredocs(command: str) -> List[Tuple[int, int, int]]:
+    """(offset of its `<<`, body start, body end) for each heredoc in `command`."""
+    return [(m.start(), m.start(3), m.end(3)) for m in HEREDOC_RX.finditer(command)]
+
+
 def mask(command: str) -> str:
     """`command` with every quoted span and heredoc body replaced by spaces of the same length."""
     out = list(command)
-    for m in HEREDOC_RX.finditer(command):
-        for i in range(m.start(3), m.end(3)):
+    for _, body_start, body_end in heredocs(command):
+        for i in range(body_start, body_end):
             if command[i] != "\n":
                 out[i] = " "
     masked = "".join(out)

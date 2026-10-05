@@ -113,6 +113,18 @@ class ApplyPatch(unittest.TestCase):
         self.assertIn(("Write", "/work/app/sub/.env"), names(out))
         self.assertNotIn(("Write", "/work/app/.env"), names(out))
 
+    def test_a_quoted_cd_or_one_in_a_closed_subshell_does_not_move_a_shell_patch(self) -> None:
+        patch = "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: k\n+x\n*** End Patch\nEOF"
+        for prefix in ("echo 'a;cd /nowhere' ; ", "(cd /nowhere) && "):
+            with self.subTest(prefix=prefix):
+                out = translate(codex("Bash", {"command": prefix + patch}, cwd="/work/secret"))
+                self.assertIn(("Write", "/work/secret/k"), names(out))
+                self.assertNotIn(("Write", "/nowhere/k"), names(out))
+
+    def test_a_cd_inside_the_subshell_that_runs_the_patch_still_applies(self) -> None:
+        command = "(cd sub && apply_patch <<'EOF')\n*** Begin Patch\n*** Add File: k\n+x\n*** End Patch\nEOF"
+        self.assertIn(("Write", "/work/app/sub/k"), names(translate(codex("Bash", {"command": command}))))
+
     def test_every_patch_in_a_shell_command_is_read(self) -> None:
         command = ("apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: a.txt\n+a\n*** End Patch\nEOF\n"
                    "cd deep && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: .env\n+K=1\n*** End Patch\nEOF")

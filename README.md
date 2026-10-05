@@ -267,11 +267,15 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   `exec_command` hook payload carries no `workdir`, so a command run in a
   subfolder that writes `notes.txt` is reported as the session folder's
   `notes.txt`. A `cd <dir>` inside the command itself is followed, for
-  patches and shell writes alike; a `cd` inside a subshell, `$( ... )` or
-  backquotes holds only until that subshell closes. A `cd` into a folder that does not
-  exist yet, followed by `;`, a newline, `||` or a background `&` rather than `&&`, may fail while
-  the next command still runs, so what follows is reported under both
-  folders.
+  patches and shell writes alike. A `cd` the shell runs in a subshell moves
+  nothing after it: one inside `( ... )`, `$( ... )` or backquotes once they
+  close, one in any command of a pipeline, and one in a list sent to the
+  background with `&`. A `cd` into a folder that does not exist yet,
+  followed by `;`, a newline or `||` rather than `&&`, may fail while the
+  next command still runs, so what follows is reported under both folders.
+  A `cd` whose folder is only known when it runs (`cd "$PWD"`, `cd -`,
+  `cd "$(git rev-parse --show-toplevel)"`) leaves every folder the command
+  has been in, the session folder included, as a place it may be.
 - **Codex reaches only what it hooks.** Codex's documentation says hosted
   tools such as its built-in web search do not pass through hooks, so the
   `web_search` translation applies only where Codex does send the call.

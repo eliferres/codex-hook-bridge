@@ -177,63 +177,79 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 
 
 # On the masked command (see mask()), so a `cd` inside quotes or a heredoc
-# body is not one: a parenthesis, or a cd at the start of a simple command,
-# past its -L/-P options and `--`. A cd with no folder goes home; one whose
-# folder starts with a backquote is read as running a command for it.
+# body is not one: a parenthesis or backquote; a separator between commands
+# (&&, ||, a background &, a pipe |, ;, a newline); or a cd at the start of a
+# simple command, past its -L/-P options and `--`. A cd with no folder goes
+# home; one whose folder starts with a backquote runs a command for it.
 FOLDER_RX = re.compile(
-    r"[()`]|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
+    r"[()`]|(?P<sep>&&|\|\||(?<![>&|])&(?![>&])|(?<![>|])\||;|\n)"
+    r"|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
     r"cd(?:[ \t]+-[LPe@]+)*(?:[ \t]+--)?"
-    r"(?:[ \t]+('[^']*'|\"[^\"]*\"|`|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
+    r"(?:[ \t]+(?P<target>'[^']*'|\"[^\"]*\"|`|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
 
 
 def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[str, ...]]:
     """A function giving the folders the shell may be in at each offset of
     `command`, the likeliest first.
 
-    Every `cd` moves it; a cd inside a subshell, `( ... )`, `$( ... )` or a
-    backquoted command, holds only until that subshell closes. A cd into a folder that does not
-    exist yet, followed by `;`, a newline, `||` or `&`, may fail and leave the shell
-    where it was while the next command still runs, so both folders count
-    from there on.
+    Every `cd` moves it, except where the shell runs the cd in a subshell of
+    its own: inside `( ... )`, `$( ... )` or backquotes until they close, in
+    any command of a pipeline, and in a list sent to the background with `&`.
+    A cd into a folder that does not exist yet, followed by `;`, a newline
+    or `||`, may fail and leave the shell where it was while the next command
+    still runs, so both folders count from there on. A cd whose folder is
+    only known when it runs (`cd "$PWD"`, `cd -`) keeps every folder seen.
     """
     masked = masked or mask(command)
     here: Tuple[str, ...] = (cwd,)
-    stack, offsets, values = [here], [0], [here]
+    # one level per subshell: where the shell is now, where the current list
+    # (commands joined by && and ||) and the current pipeline command began,
+    # whether a pipe has been seen in this pipeline, and what opened the level
+    levels = [{"now": here, "list": here, "element": here, "piped": False, "opened": ""}]
+    offsets, values = [0], [here]
     seen = {cwd: None}   # every folder this command may have been in, for a cd whose folder is not known
-    opened = [""]   # what opened each level of the stack: "(" or "`"
     for m in FOLDER_RX.finditer(masked):
-        if m.group() == "(" or (m.group() == "`" and opened[-1] != "`"):
-            stack.append(stack[-1])
-            opened.append(m.group())
-        elif m.group() in (")", "`"):
-            if opened[-1] == ("(" if m.group() == ")" else "`"):   # an unmatched `)` (a case pattern) closes nothing
-                stack.pop()
-                opened.pop()
-        elif m.group(1) is None:
-            stack[-1] = (os.path.expanduser("~"),)
-        elif unknown_folder(expand_home(command[m.start(1):m.end(1)])):
+        token, level = m.group(), levels[-1]
+        if token == "(" or (token == "`" and level["opened"] != "`"):
+            levels.append({"now": level["now"], "list": level["now"], "element": level["now"],
+                           "piped": False, "opened": token})
+        elif token in (")", "`"):
+            if level["opened"] == ("(" if token == ")" else "`") and len(levels) > 1:
+                levels.pop()   # an unmatched `)` (a case pattern) closes nothing
+        elif m.group("sep"):
+            if level["piped"] and token != "|":
+                level["now"], level["piped"] = level["element"], False   # a pipeline's last command ran apart too
+            if token == "|":
+                level["now"], level["piped"] = level["element"], True    # each pipeline command runs in a subshell
+            elif token == "&":
+                level["now"] = level["list"]                              # the whole list ran in the background
+            level["element"] = level["now"]
+            if token not in ("&&", "||", "|"):
+                level["list"] = level["now"]
+        elif m.group("target") is None:
+            level["now"] = (os.path.expanduser("~"),)
+        elif unknown_folder(expand_home(command[m.start("target"):m.end("target")])):   # quotes are blank in masked
             # `cd "$PWD"`, `cd -`, `cd "$(git rev-parse --show-toplevel)"`: the folder is only
             # known when the command runs, so every folder it may have been in still counts
-            stack[-1] = tuple(dict.fromkeys(stack[-1] + tuple(seen)))
+            level["now"] = tuple(dict.fromkeys(level["now"] + tuple(seen)))
         else:
-            target = expand_home(command[m.start(1):m.end(1)])
-            moved = tuple(dict.fromkeys(absolute(target, f) for f in stack[-1]))
+            target = expand_home(command[m.start("target"):m.end("target")])
+            moved = tuple(dict.fromkeys(absolute(target, f) for f in level["now"]))
             if any(len(f) > FOLDER_MAX for f in moved):
                 # each cd deeper costs more to follow; past this the path is not a real folder
                 raise Untranslatable("a cd in this command leads to a folder path over %d characters long, "
                                      "which the bridge does not follow" % FOLDER_MAX)
             after = masked[m.end():m.end() + 64].lstrip(" \t")[:2]
-            # only `&&` holds the next command back when the cd fails; `;`, a newline,
-            # `||` and a background `&` all let it run
-            next_runs_anyway = after[:1] in (";", "\n") or after == "||" or (after[:1] == "&" and after != "&&")
+            # `&&` holds the next command back when the cd fails; `;`, a newline and `||` let it run
+            next_runs_anyway = after[:1] in (";", "\n") or after == "||"
             may_fail = next_runs_anyway and not all(os.path.isdir(f) for f in moved)
-            stack[-1] = tuple(dict.fromkeys(moved + stack[-1])) if may_fail else moved
-        if len(stack[-1]) > FOLDERS_MAX:
+            level["now"] = tuple(dict.fromkeys(moved + level["now"])) if may_fail else moved
+        if len(levels[-1]["now"]) > FOLDERS_MAX:
             raise Untranslatable("this command's cds into folders that may not exist leave more than %d "
                                  "folders it could be in, which the bridge does not follow" % FOLDERS_MAX)
-        seen.update(dict.fromkeys(stack[-1]))
+        seen.update(dict.fromkeys(levels[-1]["now"]))
         offsets.append(m.end())
-        values.append(stack[-1])
+        values.append(levels[-1]["now"])
     return lambda offset: values[bisect.bisect_right(offsets, offset) - 1]
 
 

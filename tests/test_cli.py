@@ -211,8 +211,10 @@ class GuardedSession(unittest.TestCase):
                 {"type": "command", "command": '"%s" "%s"' % (sys.executable, guard)}]}]}}, fh)
 
     def exit_code(self, script: str) -> int:
-        payload = {"hook_event_name": "PreToolUse", "cwd": self.app, "tool_name": "shell",
-                   "tool_input": {"command": ["bash", "-lc", script]}}
+        # a patch is read from the command text itself, so patches go as exec_command's string
+        tool_input = {"cmd": script} if "apply_patch" in script else {"command": ["bash", "-lc", script]}
+        payload = {"hook_event_name": "PreToolUse", "cwd": self.app,
+                   "tool_name": "exec_command" if "cmd" in tool_input else "shell", "tool_input": tool_input}
         proc = cli(["hook", "--settings", self.settings, "--state-dir", os.path.join(self.root, "state")],
                    json.dumps(payload), env={"CLAUDE_CONFIG_DIR": os.path.join(self.root, "none")})
         return proc.returncode
@@ -229,6 +231,16 @@ class GuardedSession(unittest.TestCase):
                             'cd src && cd "$OLDPWD" && echo x > secret/k',
                             "cd /tmp && cd - && echo x > secret/k",
                             "cd `pwd` && echo x > secret/k")
+
+
+    def test_a_cd_in_a_background_job_or_a_pipeline_leaves_the_shell_where_it_was(self) -> None:
+        patch = "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: secret/k\n+x\n*** End Patch\nEOF"
+        self.assert_refused("cd /tmp & echo x > secret/k",
+                            "cd /tmp | true; echo x > secret/k",
+                            "true | cd /tmp; echo x > secret/k",
+                            "cd /tmp && true & echo x > secret/k",
+                            "cd /tmp & " + patch,
+                            "cd /tmp | true; " + patch)
 
 
 if __name__ == "__main__":

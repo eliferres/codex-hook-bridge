@@ -280,11 +280,15 @@ class ShellWrites(unittest.TestCase):
                 out = translate(codex("Bash", {"command": "cd /nowhere" + sep + "echo x > f.txt" + sep + patch}))
                 self.assertEqual(sorted(written_paths(out)),
                                  ["/nowhere/f.txt", "/nowhere/k", "/work/app/f.txt", "/work/app/k"])
-        for sep in (" || ", " & "):
+        for sep in (" || ",):
             with self.subTest(sep=sep):
                 out = translate(codex("Bash", {"command": "cd /nowhere" + sep + "echo x > f.txt"}))
                 self.assertEqual(written_paths(out),
                                  ["/nowhere/f.txt", "/work/app/f.txt"])
+        # a cd sent to the background, or in a pipeline, runs in a subshell and moves nothing
+        for command in ("cd /nowhere & echo x > f.txt", "cd /nowhere | true; echo x > f.txt"):
+            out = translate(codex("Bash", {"command": command}))
+            self.assertEqual(written_paths(out), ["/work/app/f.txt"])
         # after && the next command runs only if the cd worked, and a folder that exists is entered
         out = translate(codex("Bash", {"command": "cd /nowhere && echo x > f.txt"}))
         self.assertEqual(written_paths(out), ["/nowhere/f.txt"])

@@ -156,6 +156,11 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(reply.exit_code, 2)
         self.assertIn("refused by guard", reply.stderr)
 
+    def test_a_hook_printing_bytes_that_are_not_utf8_does_not_lose_a_refusal(self) -> None:
+        routes = [route("PreToolUse", "Bash", "noisy", "badbytes"), route("PreToolUse", "Bash", "guard", "exit2")]
+        reply = run_hook(pre("Bash", {"command": "ls"}), routes)
+        self.assertEqual((reply.exit_code, reply.stderr), (2, "refused by guard\n"))
+
     def test_one_refusal_among_several_hooks_refuses_the_call(self) -> None:
         routes = [route("PreToolUse", "Bash", "a", "context"), route("PreToolUse", "Bash", "b", "exit2")]
         reply = run_hook(pre("Bash", {"command": "ls"}), routes)

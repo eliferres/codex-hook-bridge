@@ -27,6 +27,9 @@ if mode == "ask":
                                              "permissionDecisionReason": "ask from %s" % tag}}))
 if mode == "block":
     print(json.dumps({"decision": "block", "reason": "blocked by %s" % tag}))
+if mode == "badbytes":
+    sys.stdout.buffer.write(b"\xff\xfe not utf-8\n")
+    sys.stdout.flush()
 if mode == "halt":
     print(json.dumps({"continue": False, "stopReason": "halted by %s" % tag}))
 if mode == "context":

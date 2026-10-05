@@ -103,7 +103,8 @@ def run_handler(command: str, payload: dict, timeout: float, env: dict) -> Resul
     try:
         # Its own process group, so a timeout also stops whatever the hook started.
         proc = subprocess.Popen(_shell() + [command], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, env=env, start_new_session=True)
+                                stderr=subprocess.PIPE, encoding="utf-8", errors="replace", env=env,
+                                start_new_session=True)
     except OSError as exc:
         return Result(1, "", "could not start: %s" % exc, False)
     try:

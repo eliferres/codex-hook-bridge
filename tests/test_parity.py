@@ -57,6 +57,11 @@ class Reach(unittest.TestCase):
         self.assertEqual(findings[0].status, "unaccounted")
         self.assertTrue(failed(findings))
 
+    def test_a_matcher_python_cannot_compile_is_unaccounted_with_the_reason(self) -> None:
+        state, reason = status(route("PreToolUse", "(?<tool>Bash)"))
+        self.assertEqual(state, "unaccounted")
+        self.assertIn("not a regular expression Python can evaluate", reason)
+
     def test_an_unknown_event_is_unaccounted(self) -> None:
         self.assertEqual(status(route("BeforeLunch", ""))[0], "unaccounted")
 

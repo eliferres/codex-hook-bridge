@@ -583,6 +583,19 @@ EXACT_MATCHER_RX = re.compile(r"^[A-Za-z0-9_\- ,|]+$")
 MATCH_ALL = ("", "*", None)
 
 
+def matcher_error(matcher: Optional[str]) -> str:
+    """Why Python's `re` cannot evaluate this matcher, or "" when it can.
+    Some patterns JavaScript accepts (named groups as `(?<name>...)`, `\\p{...}`)
+    fail here, and their hooks would otherwise never run without a word."""
+    if matcher in MATCH_ALL or EXACT_MATCHER_RX.match(matcher):
+        return ""
+    try:
+        re.compile(matcher)
+    except re.error as exc:
+        return str(exc)
+    return ""
+
+
 def matcher_fits(matcher: Optional[str], value: str) -> bool:
     """Whether a Claude Code matcher selects `value` (a tool name, a session
     source, an agent type, ...).

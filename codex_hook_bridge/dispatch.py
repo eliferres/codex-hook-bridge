@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, NamedTuple, Optional, Tuple
 
 from .settings import Route, handler_key
-from .translate import matcher_fits, translate
+from .translate import matcher_error, matcher_fits, translate
 
 TOOL_EVENTS = ("PreToolUse", "PostToolUse")
 # Events Codex fires that Claude Code also has, with the payload field each
@@ -220,11 +220,18 @@ def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
     if event not in BRIDGED_EVENTS:
         return Answer("", "", 0)
     started = time.monotonic()
+    notices = []
+    matched_events = [event] if BRIDGED_EVENTS[event] else []   # Stop and UserPromptSubmit ignore matchers
+    for matcher in dict.fromkeys(r.matcher for r in routes if r.event in matched_events):
+        error = matcher_error(matcher)
+        if error:
+            notices.append("codex-hook-bridge: matcher %r is not a regular expression Python can evaluate "
+                           "(%s); its hooks did not run" % (matcher, error))
     if event == "SessionEnd":
         budget = min(budget, SESSION_END_BUDGET)
     jobs = jobs_for(event, payload, routes)
     if not jobs:
-        return Answer("", "", 0)
+        return Answer("", "".join(n + "\n" for n in notices), 0)
     env = hook_env(payload, project_dir)
 
     def run(job: Job) -> Result:
@@ -243,7 +250,7 @@ def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
     with ThreadPoolExecutor(max_workers=max(1, len(runnable))) as pool:
         results = list(pool.map(run, runnable))
 
-    stops, blocks, contexts, messages, notices = [], [], [], [], []
+    stops, blocks, contexts, messages = [], [], [], []
     for job, result in zip(runnable, results):
         command = str(job.route.handler.get("command"))
         if result.timed_out:

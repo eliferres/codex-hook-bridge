@@ -161,6 +161,12 @@ class Dispatch(unittest.TestCase):
         reply = run_hook(pre("Bash", {"command": "ls"}), routes)
         self.assertEqual((reply.exit_code, reply.stderr), (2, "refused by guard\n"))
 
+    def test_a_matcher_python_cannot_compile_is_reported_not_silently_skipped(self) -> None:
+        reply = run_hook(pre("Bash", {"command": "ls"}), [route("PreToolUse", "(?<tool>Bash)", "g", "exit2")])
+        self.assertEqual(reply.exit_code, 0)
+        self.assertEqual(len(reply.stderr.splitlines()), 1)
+        self.assertIn("matcher '(?<tool>Bash)' is not a regular expression Python can evaluate", reply.stderr)
+
     def test_one_refusal_among_several_hooks_refuses_the_call(self) -> None:
         routes = [route("PreToolUse", "Bash", "a", "context"), route("PreToolUse", "Bash", "b", "exit2")]
         reply = run_hook(pre("Bash", {"command": "ls"}), routes)

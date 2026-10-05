@@ -20,7 +20,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from .dispatch import BRIDGED_EVENTS, TOOL_EVENTS
 from .settings import Route, SettingsError
-from .translate import CLAUDE_TOOLS, MATCH_ALL, matcher_fits
+from .translate import CLAUDE_TOOLS, MATCH_ALL, matcher_error, matcher_fits
 
 # Claude Code events with no Codex counterpart, and why.
 CLAUDE_ONLY_EVENTS: Dict[str, str] = {
@@ -96,6 +96,9 @@ def reach(event: str, matcher: str, handler: dict) -> Tuple[str, str]:
         return UNACCOUNTED, "%s is not a hook event this tool knows" % event
     if kind != "command":
         return UNREACHABLE, "the bridge runs command hooks only; %s hooks are skipped" % kind
+    if BRIDGED_EVENTS[event] and matcher_error(matcher):
+        return UNACCOUNTED, ("matcher is not a regular expression Python can evaluate (%s), "
+                             "so its hooks never run under the bridge" % matcher_error(matcher))
     if event not in TOOL_EVENTS:
         return REACHED, "Codex fires %s" % event
     if matcher in MATCH_ALL:

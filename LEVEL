@@ -1,0 +1,8 @@
+# What this project is responsible for, and what happens when it breaks.
+level: 1
+owner: Eli Ferres
+monitor: GitHub Actions on every push
+rollback: git revert and re-tag
+migrations: n/a: the only state is transcript copies, rebuilt from the Codex log on demand
+backups: n/a: transcript copies are disposable and pruned after 30 days
+authz: the bridge is an enforcement point: it decides allow or refuse on each Codex call by running the configured hooks; tests cover every refusal path

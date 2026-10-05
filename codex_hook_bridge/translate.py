@@ -557,12 +557,17 @@ def _list(value: object) -> list:
 
 
 def _command(tool_input: dict) -> str:
-    for key in ("command", "cmd", "script"):
-        value = tool_input.get(key)
-        if isinstance(value, list):
-            value = " ".join(str(v) for v in value)
-        if isinstance(value, str) and value:
-            return value
+    """The command text of a shell call; local_shell may nest it in `action`.
+    An argv list is joined with shell quoting, so `["bash", "-lc", "a && b"]`
+    reads as one script, not as two commands."""
+    action = tool_input.get("action")
+    for source in (tool_input, action if isinstance(action, dict) else {}):
+        for key in ("command", "cmd", "script"):
+            value = source.get(key)
+            if isinstance(value, list):
+                value = shlex.join(str(v) for v in value)
+            if isinstance(value, str) and value:
+                return value
     return ""
 
 

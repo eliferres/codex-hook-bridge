@@ -180,6 +180,14 @@ class ShellWrites(unittest.TestCase):
                 out = translate(codex(tool, {"cmd": "ls"} if tool == "exec_command" else {"command": "ls"}))
                 self.assertEqual(names(out), [("Bash", "ls")])
 
+    def test_an_argv_command_is_joined_with_shell_quoting_wherever_it_sits(self) -> None:
+        argv = ["bash", "-lc", "cd /secret && echo x > .env"]
+        for tool_input in ({"command": argv}, {"action": {"type": "exec", "command": argv}}):
+            with self.subTest(tool_input=tool_input):
+                out = translate(codex("local_shell", tool_input))
+                self.assertEqual(names(out), [("Bash", "bash -lc 'cd /secret && echo x > .env'"),
+                                              ("Write", "/secret/.env")])
+
     def test_a_redirect_is_also_a_write_to_its_target(self) -> None:
         out = translate(codex("Bash", {"command": "echo hi > notes.md"}))
         self.assertEqual(names(out), [("Bash", "echo hi > notes.md"), ("Write", "/work/app/notes.md")])

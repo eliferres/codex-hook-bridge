@@ -100,6 +100,12 @@ class ApplyPatch(unittest.TestCase):
         self.assertEqual(names(out), [("Write", "/work/app/.env")])
         self.assertEqual(out[0]["tool_input"]["content"], "A\rB\u2028C")
 
+    def test_a_shell_patch_ends_only_on_a_line_that_is_the_end_marker(self) -> None:
+        command = ("apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: notes.txt\n+see *** End Patch\n"
+                   "*** Add File: .env\n+K=1\n*** End Patch\nEOF")
+        out = translate(codex("Bash", {"command": command}))
+        self.assertIn(("Write", "/work/app/.env"), names(out))
+
     def test_every_payload_keeps_the_session_fields_and_names_the_codex_tool(self) -> None:
         for p in translate(codex("apply_patch", {"command": PATCH})):
             self.assertEqual(p["session_id"], "s1")

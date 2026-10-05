@@ -142,12 +142,20 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 
 
 def patch_in_shell(command: str) -> str:
-    """The apply_patch body inside a shell command (`apply_patch <<'EOF' ...`), or ""."""
+    """The apply_patch body inside a shell command (`apply_patch <<'EOF' ...`), or "".
+
+    The body ends at the first line whose trimmed text is the end marker, as
+    in Codex; the marker appearing inside a line of content does not end it.
+    """
     start = command.find("*** Begin Patch")
     if start < 0:
         return ""
-    end = command.find("*** End Patch", start)
-    return command[start:end + len("*** End Patch")] if end > 0 else command[start:]
+    offset = start
+    for line in command[start:].split("\n"):
+        offset += len(line) + 1
+        if line.strip() == "*** End Patch":
+            return command[start:offset - 1]
+    return command[start:]
 
 
 # ---------------------------------------------------------------------------

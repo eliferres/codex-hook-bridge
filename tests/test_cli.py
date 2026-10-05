@@ -299,5 +299,18 @@ class GuardedSession(unittest.TestCase):
                             'echo "$((1<<2))"\necho x > secret/k\n2')
 
 
+    def test_pushd_and_popd_are_followed_like_cd(self) -> None:
+        self.assert_refused("cd src && pushd .. && echo x > secret/k",
+                            "pushd secret && pushd /tmp && popd && echo x > k",
+                            "cd secret && pushd /tmp && pushd && echo x > k",
+                            "cd secret && pushd /tmp && pushd +1 && echo x > k",
+                            "cd /tmp && popd && echo x > secret/k")
+        self.assertEqual(self.exit_code("pushd src && popd && echo x > out.txt"), 0)
+        out = translate({"tool_name": "Bash", "cwd": self.app,
+                         "tool_input": {"command": "pushd src && echo a > a.txt && popd && echo b > b.txt"}})
+        self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]],
+                         [os.path.join(self.app, "src", "a.txt"), os.path.join(self.app, "b.txt")])
+
+
 if __name__ == "__main__":
     unittest.main()

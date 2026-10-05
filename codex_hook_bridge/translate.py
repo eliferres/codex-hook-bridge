@@ -181,14 +181,16 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 # (&&, ||, a background &, a pipe |, ;, a newline); or a cd at the start of a
 # simple command, past its -L/-P options and `--`. A cd with no folder goes
 # home; one whose folder starts with a backquote runs a command for it. An
-# mkdir is read too, since a folder it makes exists for a cd after it.
+# mkdir is read too, since a folder it makes exists for a cd after it, and so
+# are pushd and popd.
 FOLDER_RX = re.compile(
     r"[()`]|(?P<sep>&&|\|\||(?<![>&|])&(?![>&])|(?<![>|])\||;|\n)"
     r"|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
     r"cd(?P<options>(?:[ \t]+-[LPe@]+)*)(?:[ \t]+--)?"
     r"(?:[ \t]+(?P<target>'[^']*'|\"[^\"]*\"|`|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)\n])))"
     r"|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
-    r"mkdir(?P<mkdir>[ \t][^;&|\n()`]*)", re.M)
+    r"(?:mkdir(?P<mkdir>[ \t][^;&|\n()`]*)|(?P<dirs>pushd|popd)(?P<dirs_args>[ \t][^;&|\n()`]*)?(?=[;&|)\n]|$))",
+    re.M)
 
 
 def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[str, ...]]:
@@ -202,16 +204,38 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
     or `||`, may fail and leave the shell where it was while the next command
     still runs, so both folders count from there on. A cd whose folder is
     only known when it runs (`cd "$PWD"`, `cd -`) keeps every folder seen.
+    `pushd DIR` moves like cd and remembers where it was, and `popd` goes
+    back; any other pushd or popd (no folder, +N, -N, -n, or popd with
+    nothing remembered) keeps every folder seen rather than guess.
     """
     masked = masked or mask(command)
     here: Tuple[str, ...] = (cwd,)
     # one level per subshell: where the shell is now, where the current list
     # (commands joined by && and ||) and the current pipeline command began,
     # whether a pipe has been seen in this pipeline, and what opened the level
-    levels = [{"now": here, "list": here, "element": here, "piped": False, "opened": ""}]
+    # and the folders pushd remembers (None once a pushd or popd made them unknown)
+    levels = [{"now": here, "list": here, "element": here, "piped": False, "opened": "", "pushed": []}]
     offsets, values = [0], [here]
     seen = {cwd: None}   # every folder this command may have been in, for a cd whose folder is not known
     made = set()         # folders an mkdir earlier in the command makes
+    def go(now: Tuple[str, ...], target: str, physical: bool, end: int) -> Tuple[str, ...]:
+        """Where a cd to `target` (as written, quotes included) from `now` leads."""
+        target = expand_home(target)
+        if unknown_folder(target):
+            # `cd "$PWD"`, `cd -`, `cd "$(git rev-parse --show-toplevel)"`: the folder is only
+            # known when the command runs, so every folder it may have been in still counts
+            return tuple(dict.fromkeys(now + tuple(seen)))
+        moved = tuple(dict.fromkeys(cd_folder(target, f, physical) for f in now))
+        if any(len(f) > FOLDER_MAX for f in moved):
+            # each cd deeper costs more to follow; past this the path is not a real folder
+            raise Untranslatable("a cd in this command leads to a folder path over %d characters long, "
+                                 "which the bridge does not follow" % FOLDER_MAX)
+        after = masked[end:end + 64].lstrip(" \t")[:2]
+        # `&&` holds the next command back when the cd fails; `;`, a newline and `||` let it run
+        next_runs_anyway = after[:1] in (";", "\n") or after == "||"
+        may_fail = next_runs_anyway and not all(f in made or os.path.isdir(f) for f in moved)
+        return tuple(dict.fromkeys(moved + now)) if may_fail else moved
+
     for m in FOLDER_RX.finditer(masked):
         token, level = m.group(), levels[-1]
         if m.group("mkdir") is not None:
@@ -222,8 +246,9 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
                         path = os.path.dirname(path)
             continue
         if token == "(" or (token == "`" and level["opened"] != "`"):
+            pushed = None if level["pushed"] is None else list(level["pushed"])
             levels.append({"now": level["now"], "list": level["now"], "element": level["now"],
-                           "piped": False, "opened": token})
+                           "piped": False, "opened": token, "pushed": pushed})
         elif token in (")", "`"):
             if level["opened"] == ("(" if token == ")" else "`") and len(levels) > 1:
                 levels.pop()   # an unmatched `)` (a case pattern) closes nothing
@@ -237,26 +262,25 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
             level["element"] = level["now"]
             if token not in ("&&", "||", "|"):
                 level["list"] = level["now"]
+        elif m.group("dirs"):
+            args = _words(command[m.start("dirs_args"):m.end("dirs_args")]) if m.group("dirs_args") else []
+            remembered = level["pushed"]
+            if m.group("dirs") == "pushd" and len(args) == 1 and not args[0].startswith(("+", "-")):
+                if remembered is not None:
+                    remembered.append(level["now"])   # each subshell level holds its own copy
+                level["now"] = go(level["now"], args[0], False, m.end())
+            elif m.group("dirs") == "popd" and not args and remembered:
+                level["now"] = remembered.pop()
+            else:
+                # the folder it leads to depends on a stack this reading does not hold
+                level["now"], level["pushed"] = tuple(dict.fromkeys(level["now"] + tuple(seen))), None
         elif m.group("target") is None:
             level["now"] = (os.path.expanduser("~"),)
-        elif unknown_folder(expand_home(command[m.start("target"):m.end("target")])):   # quotes are blank in masked
-            # `cd "$PWD"`, `cd -`, `cd "$(git rev-parse --show-toplevel)"`: the folder is only
-            # known when the command runs, so every folder it may have been in still counts
-            level["now"] = tuple(dict.fromkeys(level["now"] + tuple(seen)))
         else:
-            target = expand_home(command[m.start("target"):m.end("target")])
             options = m.group("options").replace("e", "").replace("@", "")
             physical = options.rfind("P") > options.rfind("L")   # the last of -L and -P wins, -L by default
-            moved = tuple(dict.fromkeys(cd_folder(target, f, physical) for f in level["now"]))
-            if any(len(f) > FOLDER_MAX for f in moved):
-                # each cd deeper costs more to follow; past this the path is not a real folder
-                raise Untranslatable("a cd in this command leads to a folder path over %d characters long, "
-                                     "which the bridge does not follow" % FOLDER_MAX)
-            after = masked[m.end():m.end() + 64].lstrip(" \t")[:2]
-            # `&&` holds the next command back when the cd fails; `;`, a newline and `||` let it run
-            next_runs_anyway = after[:1] in (";", "\n") or after == "||"
-            may_fail = next_runs_anyway and not all(f in made or os.path.isdir(f) for f in moved)
-            level["now"] = tuple(dict.fromkeys(moved + level["now"])) if may_fail else moved
+            # the target read from the command, not the masked text, where quotes are blank
+            level["now"] = go(level["now"], command[m.start("target"):m.end("target")], physical, m.end())
         if len(levels[-1]["now"]) > FOLDERS_MAX:
             raise Untranslatable("this command's cds into folders that may not exist leave more than %d "
                                  "folders it could be in, which the bridge does not follow" % FOLDERS_MAX)

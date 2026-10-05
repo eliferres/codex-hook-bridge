@@ -280,7 +280,9 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   `cd "$(git rev-parse --show-toplevel)"`) leaves every folder the command
   has been in, the session folder included, as a place it may be. As in
   bash, `cd` is logical: `cd link/..` climbs back out of the link by name,
-  unless `-P` is given.
+  unless `-P` is given. `pushd DIR` and `popd` are followed the same way; a
+  `pushd` or `popd` whose folder depends on the directory stack (no folder,
+  `+N`, `-N`, `-n`) keeps every folder the command has been in.
 - **Codex reaches only what it hooks.** Codex's documentation says hosted
   tools such as its built-in web search do not pass through hooks, so the
   `web_search` translation applies only where Codex does send the call.

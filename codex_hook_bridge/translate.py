@@ -391,7 +391,7 @@ def scan(command: str) -> Scan:
     blank: List[Tuple[int, int, bool]] = []   # (start, end, keep newlines)
     bodies: List[Tuple[int, int, int]] = []
     quoted: List[Tuple[int, int]] = []
-    stack: List[list] = []     # open contexts [kind, offset, where blanking resumes]: ' " ` $( (
+    stack: List[list] = []     # open contexts [kind, offset, where blanking resumes]: ' " ` $( ( $(( ((
     pending: List[Tuple[str, int]] = []       # heredocs whose bodies start after this line
     i, size = 0, len(command)
     while i < size:
@@ -416,9 +416,12 @@ def scan(command: str) -> Scan:
             if m.group() == '"':
                 stack.pop()
                 quoted.append((top[1] + 1, m.start()))
-            else:   # $( or ` inside double quotes: the shell runs it, so it stays visible
-                stack.append([m.group(), m.start(), 0])
             i = m.end()
+            if m.group() == "$(" and command.startswith("(", i):
+                stack.append(["$((", m.start(), 0])   # arithmetic inside double quotes
+                i += 1
+            elif m.group() != '"':   # $( or ` inside double quotes: the shell runs it, so it stays visible
+                stack.append([m.group(), m.start(), 0])
             continue
         m = SHELL_TOKEN_RX.search(command, i)
         if not m:
@@ -435,10 +438,14 @@ def scan(command: str) -> Scan:
                 i = size if line_end < 0 else line_end
                 blank.append((m.start(), i, False))
         elif token in ("$(", "("):
+            if command.startswith("(", i):   # $(( or ((: arithmetic, where << is a shift
+                token, i = token + "(", i + 1
             stack.append([token, m.start(), 0])
         elif token in (")", "`"):
-            closes = ("$(", "(") if token == ")" else ("`",)
+            closes = ("$(", "(", "$((", "((") if token == ")" else ("`",)
             if top[0] in closes:
+                if top[0] in ("$((", "((") and command.startswith(")", i):
+                    i += 1   # arithmetic ends at ))
                 stack.pop()
                 if stack and stack[-1][0] == '"':
                     stack[-1][2] = i   # back inside double quotes: blanking resumes here
@@ -447,7 +454,7 @@ def scan(command: str) -> Scan:
             # an unmatched `)` (a case pattern) closes nothing
         elif token == "<<":
             mark = HEREDOC_MARK_RX.match(command, m.start())
-            if mark:
+            if mark and not any(kind in ("$((", "((") for kind, _, _ in stack):
                 pending.append((mark.group(2), m.start()))
                 i = mark.end()
         elif token == "\n" and pending:

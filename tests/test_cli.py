@@ -294,5 +294,10 @@ class GuardedSession(unittest.TestCase):
                 self.assertEqual(self.run_tool(tool, {key: wrap(patch)}), 0)
 
 
+    def test_a_shift_inside_arithmetic_is_not_a_heredoc(self) -> None:
+        self.assert_refused("echo $((1<<2))\necho x > secret/k\n2", "((n = 1<<2))\necho x > secret/k\n2",
+                            'echo "$((1<<2))"\necho x > secret/k\n2')
+
+
 if __name__ == "__main__":
     unittest.main()

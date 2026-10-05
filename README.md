@@ -226,6 +226,11 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   It knows redirects and the common writers (`cp`, `mv`, `tee`, `sed -i`,
   `perl -i`, `dd`, `curl -o`, `tar -C`, `git checkout --` and more); a write
   done by a script the command runs is invisible to it.
+- **Relative shell writes resolve against the session folder.** Codex's
+  `exec_command` hook payload carries no `workdir`, so a command run in a
+  subfolder that writes `notes.txt` is reported as the session folder's
+  `notes.txt`. A `cd <dir>` inside the command itself is followed for
+  patches.
 - **Codex reaches only what it hooks.** Codex's documentation says hosted
   tools such as its built-in web search do not pass through hooks, so the
   `web_search` translation applies only where Codex does send the call.

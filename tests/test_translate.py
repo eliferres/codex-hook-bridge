@@ -94,6 +94,12 @@ class ApplyPatch(unittest.TestCase):
         out = translate(codex("Bash", {"command": "echo x > /work/app/./a/../b.txt"}))
         self.assertEqual(out[1]["tool_input"]["file_path"], "/work/app/b.txt")
 
+    def test_lines_split_on_newline_only_as_codex_does(self) -> None:
+        body = "*** Begin Patch\r\n*** Add File: x\r/../.env\r\n+A\rB\u2028C\r\n*** End Patch\r\n"
+        out = translate(codex("apply_patch", {"command": body}))
+        self.assertEqual(names(out), [("Write", "/work/app/.env")])
+        self.assertEqual(out[0]["tool_input"]["content"], "A\rB\u2028C")
+
     def test_every_payload_keeps_the_session_fields_and_names_the_codex_tool(self) -> None:
         for p in translate(codex("apply_patch", {"command": PATCH})):
             self.assertEqual(p["session_id"], "s1")

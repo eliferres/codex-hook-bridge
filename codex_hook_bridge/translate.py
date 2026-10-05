@@ -72,7 +72,9 @@ def parse_patch(body: str) -> List[dict]:
     # Header lines are recognized the way Codex's own parser does it: with the
     # line trimmed on both sides, except inside an Update section, where only
     # trailing space is trimmed, so an indented header there is a context line.
-    for line in body.strip().splitlines():
+    # Lines split on \n only, one trailing \r dropped: str.splitlines() would
+    # also split on a lone \r, VT or U+2028 and read a different file name.
+    for line in body.strip().split("\n"):
         line = line[:-1] if line.endswith("\r") else line
         in_update = cur is not None and cur["op"] == "update"
         marker_text = line.rstrip() if in_update else line.strip()

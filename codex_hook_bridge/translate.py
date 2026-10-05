@@ -183,14 +183,19 @@ FOLDER_RX = re.compile(
     r"(?:[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
 
 
-def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], str]:
-    """A function giving the folder the shell is in at each offset of `command`.
+def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[str, ...]]:
+    """A function giving the folders the shell may be in at each offset of
+    `command`, the likeliest first.
 
     Every `cd` moves it; a cd inside a subshell, `( ... )`, holds only until
-    the subshell's closing parenthesis.
+    the subshell's closing parenthesis. A cd into a folder that does not
+    exist yet, followed by `;` or a newline, may fail and leave the shell
+    where it was while the next command still runs, so both folders count
+    from there on.
     """
     masked = masked or mask(command)
-    stack, offsets, values = [cwd], [0], [cwd]
+    here: Tuple[str, ...] = (cwd,)
+    stack, offsets, values = [here], [0], [here]
     for m in FOLDER_RX.finditer(masked):
         if m.group() == "(":
             stack.append(stack[-1])
@@ -198,13 +203,17 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], str]:
             if len(stack) > 1:   # an unmatched `)` (a case pattern) closes nothing
                 stack.pop()
         elif m.group(1) is None:
-            stack[-1] = os.path.expanduser("~")
+            stack[-1] = (os.path.expanduser("~"),)
         elif command[m.start(1):m.end(1)] != "-":   # `cd -`: the previous folder, not known here
-            stack[-1] = absolute(expand_home(command[m.start(1):m.end(1)]), stack[-1])
-            if len(stack[-1]) > FOLDER_MAX:
+            target = expand_home(command[m.start(1):m.end(1)])
+            moved = tuple(dict.fromkeys(absolute(target, f) for f in stack[-1]))
+            if any(len(f) > FOLDER_MAX for f in moved):
                 # each cd deeper costs more to follow; past this the path is not a real folder
                 raise Untranslatable("a cd in this command leads to a folder path over %d characters long, "
                                      "which the bridge does not follow" % FOLDER_MAX)
+            after = masked[m.end():m.end() + 64].lstrip(" \t")[:1]
+            may_fail = after in (";", "\n") and not all(os.path.isdir(f) for f in moved)
+            stack[-1] = tuple(dict.fromkeys(moved + stack[-1])) if may_fail else moved
         offsets.append(m.end())
         values.append(stack[-1])
     return lambda offset: values[bisect.bisect_right(offsets, offset) - 1]
@@ -212,7 +221,8 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], str]:
 
 def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
     """(apply_patch body, folder its paths resolve against) for every patch
-    inside a shell command (`apply_patch <<'EOF' ...`), in order.
+    inside a shell command (`apply_patch <<'EOF' ...`), in order, once for
+    each folder the shell may be in (see folders()).
 
     A body ends at the first line whose trimmed text is the end marker, as
     in Codex; the marker appearing inside a line of content does not end it.
@@ -233,7 +243,7 @@ def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
         opened_at = bodies[k][0] if k >= 0 and start <= bodies[k][2] else start
         marker = END_PATCH_RX.search(command, start)
         end = marker.end() if marker else len(command)
-        found.append((command[start:end], where(opened_at)))
+        found += [(command[start:end], folder) for folder in where(opened_at)]
         done = end
 
 
@@ -611,10 +621,11 @@ def shell_targets(command: str, cwd: str, depth: int = 0) -> List[Tuple[str, str
                              "which the bridge does not read" % NEST_MAX)
     masked = mask(command)
     where = folders(command, cwd, masked)
-    found = [("Write", _resolve(name, where(offset))) for name, offset in redirect_targets(command, masked)]
+    found = [("Write", _resolve(name, folder))
+             for name, offset in redirect_targets(command, masked) for folder in where(offset)]
     for words, offset in _segments(command, masked):
-        found += [(tool, _resolve(name, where(offset)))
-                  for tool, name in segment_targets(words, where(offset), depth)]
+        found += [(tool, _resolve(name, folder))
+                  for folder in where(offset) for tool, name in segment_targets(words, folder, depth)]
     return [t for t in dict.fromkeys(found) if t[1]]
 
 
@@ -646,7 +657,7 @@ def shell_write_calls(command: str, cwd: str) -> List[Call]:
             if os.path.basename(words[0]) in ("cp", "cat", "install", "ditto"):
                 operands = [w for w in words[1:] if not w.startswith("-")]
                 sources = operands[:-1] or operands
-                bodies += [t for t in (_read_small(absolute(o, where(offset))) for o in sources) if t]
+                bodies += [t for t in (_read_small(absolute(o, where(offset)[0])) for o in sources) if t]
     if not bodies:
         quoted = [command[start:end] for start, end in scan(command).quoted]
         if quoted:

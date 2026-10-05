@@ -232,7 +232,7 @@ class ShellWrites(unittest.TestCase):
     def test_a_cd_moves_where_a_shell_write_lands(self) -> None:
         cases = {
             "cd /secret && echo x > .env": ["/secret/.env"],
-            "cd sub; cp a.txt b.txt": ["/work/app/sub/b.txt"],
+            "cd sub; cp a.txt b.txt": ["/work/app/sub/b.txt", "/work/app/b.txt"],   # sub may not exist
             "bash -c 'cd /secret && tee .env'": ["/secret/.env"],
             "(cd sub && echo x > p.txt); echo y > q.txt": ["/work/app/sub/p.txt", "/work/app/q.txt"],
         }
@@ -240,6 +240,20 @@ class ShellWrites(unittest.TestCase):
             with self.subTest(command=command):
                 out = translate(codex("Bash", {"command": command}))
                 self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], expected)
+
+    def test_a_cd_that_may_fail_before_a_semicolon_or_newline_reports_both_folders(self) -> None:
+        patch = "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: k\n+x\n*** End Patch\nEOF"
+        for sep in (" ; ", "\n"):
+            with self.subTest(sep=sep):
+                out = translate(codex("Bash", {"command": "cd /nowhere" + sep + "echo x > f.txt" + sep + patch}))
+                self.assertEqual(sorted(p["tool_input"]["file_path"] for p in out[1:]),
+                                 ["/nowhere/f.txt", "/nowhere/k", "/work/app/f.txt", "/work/app/k"])
+        # after && the next command runs only if the cd worked, and a folder that exists is entered
+        out = translate(codex("Bash", {"command": "cd /nowhere && echo x > f.txt"}))
+        self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], ["/nowhere/f.txt"])
+        with tempfile.TemporaryDirectory() as tmp:
+            out = translate(codex("Bash", {"command": "cd %s ; echo x > f.txt" % tmp}))
+            self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], [os.path.join(tmp, "f.txt")])
 
     def test_a_cd_to_home_is_expanded_however_it_is_spelled(self) -> None:
         patch = " && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: p.env\n+K=1\n*** End Patch\nEOF"
@@ -274,7 +288,7 @@ class ShellWrites(unittest.TestCase):
             "stdbuf -o L tee stdbuf2.txt": [("Write", "stdbuf2.txt")],
             "git restore .env": [("Write", ".env"), ("Edit", ".env")],
             "git restore --source HEAD~1 -- a.py": [("Write", "a.py"), ("Edit", "a.py")],
-            "for d in a; do cd /secret; done; echo x > .env": [("Write", "/secret/.env")],
+            "for d in a; do cd /secret; done; echo x > .env": [("Write", "/secret/.env"), ("Write", ".env")],
         }
         for command, expected in cases.items():
             with self.subTest(command=command):

@@ -259,7 +259,10 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   subfolder that writes `notes.txt` is reported as the session folder's
   `notes.txt`. A `cd <dir>` inside the command itself is followed, for
   patches and shell writes alike; a `cd` inside a subshell holds only until
-  the subshell's closing parenthesis.
+  the subshell's closing parenthesis. A `cd` into a folder that does not
+  exist yet, followed by `;` or a newline rather than `&&`, may fail while
+  the next command still runs, so what follows is reported under both
+  folders.
 - **Codex reaches only what it hooks.** Codex's documentation says hosted
   tools such as its built-in web search do not pass through hooks, so the
   `web_search` translation applies only where Codex does send the call.

@@ -46,8 +46,23 @@ def absolute(path: str, cwd: str) -> str:
     path = os.path.expanduser(str(path).strip().strip("'\""))
     if path.startswith("file://"):
         path = path[7:]
+    joined = path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path)
     # normalized either way, so `/a/b/../.env` reaches a hook as `/a/.env`
-    return os.path.normpath(path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path))
+    lexical = os.path.normpath(joined)
+    if ".." not in joined.split(os.sep):
+        return lexical
+    # A `..` after a symlink climbs out of the link's target, not out of the
+    # folder the link sits in, so the tidied path can name a different file.
+    # Then, and only then, the parent folder's real path is used: a path that
+    # needs no resolving stays as written, so a hook comparing it with the
+    # session folder still matches when that folder sits behind a symlink.
+    head, tail = os.path.split(joined)
+    if tail in ("", ".", ".."):
+        head, tail = joined, ""
+    real = os.path.realpath(head)
+    if real == os.path.realpath(os.path.dirname(lexical) if tail else lexical):
+        return lexical
+    return os.path.join(real, tail) if tail else real
 
 
 def shell_quote(text: str) -> str:

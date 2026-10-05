@@ -95,6 +95,23 @@ class ApplyPatch(unittest.TestCase):
         out = translate(codex("Bash", {"command": "echo x > /work/app/./a/../b.txt"}))
         self.assertEqual(out[1]["tool_input"]["file_path"], "/work/app/b.txt")
 
+    def test_dot_dot_after_a_symlink_names_the_file_it_really_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            os.makedirs(os.path.join(tmp, "secret", "sub"))
+            os.makedirs(os.path.join(tmp, "app"))
+            os.symlink(os.path.join(tmp, "secret", "sub"), os.path.join(tmp, "app", "link"))
+            body = "*** Begin Patch\n*** Add File: link/../k\n+x\n*** End Patch"
+            out = translate(codex("apply_patch", {"command": body}, cwd=os.path.join(tmp, "app")))
+            self.assertEqual(names(out), [("Write", os.path.join(tmp, "secret", "k"))])
+
+    def test_dot_dot_with_no_symlink_in_the_way_keeps_the_path_as_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:   # on macOS tmp itself sits behind /var -> /private/var
+            os.makedirs(os.path.join(tmp, "a"))
+            body = "*** Begin Patch\n*** Add File: a/../k\n+x\n*** End Patch"
+            out = translate(codex("apply_patch", {"command": body}, cwd=tmp))
+            self.assertEqual(names(out), [("Write", os.path.join(tmp, "k"))])
+
     def test_lines_split_on_newline_only_as_codex_does(self) -> None:
         body = "*** Begin Patch\r\n*** Add File: x\r/../.env\r\n+A\rB\u2028C\r\n*** End Patch\r\n"
         out = translate(codex("apply_patch", {"command": body}))

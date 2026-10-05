@@ -269,7 +269,7 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   `exec_command` hook payload carries no `workdir`, so a command run in a
   subfolder that writes `notes.txt` is reported as the session folder's
   `notes.txt`. A `cd <dir>` inside the command itself is followed, for
-  patches and shell writes alike. A `cd` the shell runs in a subshell moves
+  patches and shell writes alike, inside a `bash -c` script too. A `cd` the shell runs in a subshell moves
   nothing after it: one inside `( ... )`, `$( ... )` or backquotes once they
   close, one in any command of a pipeline, and one in a list sent to the
   background with `&`. A `cd` into a folder that does not exist yet,

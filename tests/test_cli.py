@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -211,6 +212,12 @@ class GuardedSession(unittest.TestCase):
             json.dump({"hooks": {"PreToolUse": [{"matcher": "Write|Edit", "hooks": [
                 {"type": "command", "command": '"%s" "%s"' % (sys.executable, guard)}]}]}}, fh)
 
+    def run_tool(self, tool: str, tool_input: dict) -> int:
+        payload = {"hook_event_name": "PreToolUse", "cwd": self.app, "tool_name": tool, "tool_input": tool_input}
+        proc = cli(["hook", "--settings", self.settings, "--state-dir", os.path.join(self.root, "state")],
+                   json.dumps(payload), env={"CLAUDE_CONFIG_DIR": os.path.join(self.root, "none")})
+        return proc.returncode
+
     def exit_code(self, script: str) -> int:
         # a patch is read from the command text itself, so patches go as exec_command's string
         tool_input = {"cmd": script} if "apply_patch" in script else {"command": ["bash", "-lc", script]}
@@ -275,6 +282,16 @@ class GuardedSession(unittest.TestCase):
                         "curl -s https://example.com/api | jq .", "tar -czf out.tgz src", two_files, script):
             with self.subTest(command=command):
                 self.assertEqual(self.exit_code(command), 0)
+
+
+    def test_a_patch_inside_a_bash_script_follows_the_cd_before_it_there(self) -> None:
+        patch = "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: k\n+x\n*** End Patch\nEOF"
+        for tool, key, wrap in (("shell", "command", lambda c: ["bash", "-lc", c]),
+                                ("local_shell", "action", lambda c: {"type": "exec", "command": ["bash", "-lc", c]}),
+                                ("exec_command", "cmd", lambda c: "bash -lc %s" % shlex.quote(c))):
+            with self.subTest(tool=tool):
+                self.assertEqual(self.run_tool(tool, {key: wrap("cd secret && " + patch)}), 2)
+                self.assertEqual(self.run_tool(tool, {key: wrap(patch)}), 0)
 
 
 if __name__ == "__main__":

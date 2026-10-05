@@ -293,7 +293,7 @@ def unknown_folder(target: str) -> bool:
     return target == "-" or "$" in target or "`" in target
 
 
-def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
+def patches_in_shell(command: str, cwd: str, depth: int = 0) -> List[Tuple[str, str]]:
     """(apply_patch body, folder its paths resolve against) for every patch
     inside a shell command (`apply_patch <<'EOF' ...`), in order, once for
     each folder the shell may be in (see folders()).
@@ -303,7 +303,13 @@ def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
     A patch resolves in the folder its command runs in: after any `cd` before
     it (Codex's own `cd <dir> && apply_patch` form included), and for a
     heredoc, at the `<<` that opens it rather than where its body sits.
+    A patch inside a `bash -c` script or an `eval` is also read within that
+    script, from the folder the script starts in, so a cd before it there
+    counts as well; the outer reading stays, so a patch is never dropped.
     """
+    if depth > NEST_MAX:
+        raise Untranslatable("this command nests bash -c or eval more than %d deep, "
+                             "which the bridge does not read" % NEST_MAX)
     found: List[Tuple[str, str]] = []
     where = folders(command, cwd)
     bodies = heredocs(command)
@@ -312,13 +318,20 @@ def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
     while True:
         start = command.find("*** Begin Patch", done)
         if start < 0:
-            return found
+            break
         k = bisect.bisect_right(body_starts, start) - 1
         opened_at = bodies[k][0] if k >= 0 and start <= bodies[k][2] else start
         marker = END_PATCH_RX.search(command, start)
         end = marker.end() if marker else len(command)
         found += [(command[start:end], folder) for folder in where(opened_at)]
         done = end
+    if found:   # a script can hold a patch only where the command does
+        for words, offset in _segments(command):
+            script = inner_script(unwrap(words))
+            if script is not None and "*** Begin Patch" in script:
+                for folder in where(offset):
+                    found += patches_in_shell(script, folder, depth + 1)
+    return list(dict.fromkeys(found))
 
 
 # ---------------------------------------------------------------------------
@@ -628,6 +641,23 @@ def restored_paths(words: List[str]) -> List[str]:
     return paths
 
 
+def inner_script(words: List[str]) -> Optional[str]:
+    """The script a simple command hands to a shell of its own, `bash -c
+    SCRIPT` (or -lc, -ec, past any --) or `eval ...`, or None. `words` is
+    already unwrapped."""
+    prog = os.path.basename(words[0]) if words else ""
+    if prog == "eval":
+        return " ".join(words[1:])
+    if prog in SHELLS:
+        flag = next((i for i, w in enumerate(words[1:], 1)
+                     if w.startswith("-") and not w.startswith("--") and "c" in w[1:]), None)
+        script = words[flag + 1:] if flag is not None else []
+        script = script[1:] if script[:1] == ["--"] else script
+        if script:
+            return script[0]
+    return None
+
+
 def segment_targets(words: List[str], folder: str, depth: int = 0) -> List[Tuple[str, str]]:
     """(Write or Edit, file) for each file one simple command run in `folder`
     writes, by what its program is known to write, the file as written in
@@ -636,16 +666,9 @@ def segment_targets(words: List[str], folder: str, depth: int = 0) -> List[Tuple
     if not words:
         return []
     prog = os.path.basename(words[0])
-    if prog in SHELLS:
-        # -c alone or combined with other flags (-lc, -ec): the next word, past any --, is the command
-        flag = next((i for i, w in enumerate(words[1:], 1)
-                     if w.startswith("-") and not w.startswith("--") and "c" in w[1:]), None)
-        script = words[flag + 1:] if flag is not None else []
-        script = script[1:] if script[:1] == ["--"] else script
-        if script:
-            return shell_targets(script[0], folder, depth + 1)   # absolute already, so they resolve to themselves
-    if prog == "eval":
-        return shell_targets(" ".join(words[1:]), folder, depth + 1)
+    script = inner_script(words)
+    if script is not None:
+        return shell_targets(script, folder, depth + 1)   # absolute already, so they resolve to themselves
     if prog == "git":
         words, git_folder = git_command(words)
         if len(words) > 2 and words[1] == "restore":

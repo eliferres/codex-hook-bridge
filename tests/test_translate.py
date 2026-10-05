@@ -262,6 +262,12 @@ class ShellWrites(unittest.TestCase):
             out = translate(codex("Bash", {"command": "cd %s ; echo x > f.txt" % tmp}))
             self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], [os.path.join(tmp, "f.txt")])
 
+    def test_a_cd_inside_a_substitution_leaves_the_rest_of_the_command_where_it_was(self) -> None:
+        for inner in ("$(cd /x && pwd)", "`cd /x && pwd`", '"$(cd /x)"', "`cd /x`"):
+            with self.subTest(inner=inner):
+                out = translate(codex("Bash", {"command": "d=%s && echo y > f.txt" % inner}))
+                self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], ["/work/app/f.txt"])
+
     def test_a_cd_to_home_is_expanded_however_it_is_spelled(self) -> None:
         patch = " && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: p.env\n+K=1\n*** End Patch\nEOF"
         with mock.patch.dict(os.environ, {"HOME": "/home/u"}):

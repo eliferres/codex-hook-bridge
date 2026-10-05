@@ -259,8 +259,8 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   `exec_command` hook payload carries no `workdir`, so a command run in a
   subfolder that writes `notes.txt` is reported as the session folder's
   `notes.txt`. A `cd <dir>` inside the command itself is followed, for
-  patches and shell writes alike; a `cd` inside a subshell holds only until
-  the subshell's closing parenthesis. A `cd` into a folder that does not
+  patches and shell writes alike; a `cd` inside a subshell, `$( ... )` or
+  backquotes holds only until that subshell closes. A `cd` into a folder that does not
   exist yet, followed by `;` or a newline rather than `&&`, may fail while
   the next command still runs, so what follows is reported under both
   folders.

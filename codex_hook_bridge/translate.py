@@ -178,17 +178,17 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 # body is not one: a parenthesis, or a cd at the start of a simple command,
 # past its -L/-P options and `--`. A cd with no folder goes home.
 FOLDER_RX = re.compile(
-    r"[()]|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
+    r"[()`]|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
     r"cd(?:[ \t]+-[LPe@]+)*(?:[ \t]+--)?"
-    r"(?:[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
+    r"(?:[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)`\n])))", re.M)
 
 
 def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[str, ...]]:
     """A function giving the folders the shell may be in at each offset of
     `command`, the likeliest first.
 
-    Every `cd` moves it; a cd inside a subshell, `( ... )`, holds only until
-    the subshell's closing parenthesis. A cd into a folder that does not
+    Every `cd` moves it; a cd inside a subshell, `( ... )`, `$( ... )` or a
+    backquoted command, holds only until that subshell closes. A cd into a folder that does not
     exist yet, followed by `;` or a newline, may fail and leave the shell
     where it was while the next command still runs, so both folders count
     from there on.
@@ -196,12 +196,15 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
     masked = masked or mask(command)
     here: Tuple[str, ...] = (cwd,)
     stack, offsets, values = [here], [0], [here]
+    opened = [""]   # what opened each level of the stack: "(" or "`"
     for m in FOLDER_RX.finditer(masked):
-        if m.group() == "(":
+        if m.group() == "(" or (m.group() == "`" and opened[-1] != "`"):
             stack.append(stack[-1])
-        elif m.group() == ")":
-            if len(stack) > 1:   # an unmatched `)` (a case pattern) closes nothing
+            opened.append(m.group())
+        elif m.group() in (")", "`"):
+            if opened[-1] == ("(" if m.group() == ")" else "`"):   # an unmatched `)` (a case pattern) closes nothing
                 stack.pop()
+                opened.pop()
         elif m.group(1) is None:
             stack[-1] = (os.path.expanduser("~"),)
         elif command[m.start(1):m.end(1)] != "-":   # `cd -`: the previous folder, not known here

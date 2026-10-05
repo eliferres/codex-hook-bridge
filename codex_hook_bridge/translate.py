@@ -187,9 +187,6 @@ INPLACE_PROGS = ("sed", "gsed", "perl", "ruby")
 OUTPUT_OPTIONS = {"curl": ("-o", "--output"), "wget": ("-O", "--output-document"),
                   "tar": ("-C", "--directory"), "unzip": ("-d",)}
 WRAPPERS = ("sudo", "env", "command", "nohup", "time", "timeout", "nice", "exec", "xargs", "doas")
-WRITERS = ("cp", "mv", "install", "rsync", "ditto", "ln", "tee", "truncate", "touch", "dd",
-           "curl", "wget", "tar", "unzip", "git", "sed", "gsed", "perl", "ruby",
-           "bash", "sh", "zsh", "dash")
 SHELLS = ("bash", "sh", "zsh", "dash")
 
 
@@ -266,13 +263,40 @@ def inplace_files(words: List[str]) -> List[str]:
     return [f for f in operands[1:] if f != "<program>"]
 
 
+# Wrapper options that take a separate value, so the value is not mistaken
+# for the program (`sudo -u git cp ...` runs cp, not git).
+WRAPPER_VALUE_OPTIONS = {
+    "sudo": ("-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T"),
+    "doas": ("-u", "-C"),
+    "env": ("-u", "-C", "-S", "--unset", "--chdir", "--split-string"),
+    "timeout": ("-s", "-k", "--signal", "--kill-after"),
+    "nice": ("-n", "--adjustment"),
+    "time": ("-f", "-o", "--format", "--output"),
+    "xargs": ("-I", "-n", "-P", "-d", "-L", "-s", "-E", "-a", "--max-args", "--max-procs",
+              "--delimiter", "--arg-file"),
+}
+
+
+def unwrap(words: List[str]) -> List[str]:
+    """`words` with any leading wrappers (sudo, env, timeout, ...) and their
+    own options and values removed, so the first word is the program run."""
+    while words and os.path.basename(words[0]) in WRAPPERS:
+        wrapper = os.path.basename(words[0])
+        rest = words[1:]
+        while rest and (rest[0].startswith("-") or (wrapper == "env" and "=" in rest[0])):
+            takes_value = rest[0] in WRAPPER_VALUE_OPTIONS.get(wrapper, ())
+            rest = rest[2:] if takes_value else rest[1:]
+        if wrapper == "timeout" and rest:
+            rest = rest[1:]   # the duration
+        words = rest
+    return words
+
+
 def segment_targets(words: List[str]) -> List[str]:
     """The files one simple command writes, by what its program is known to write."""
-    if words and os.path.basename(words[0]) in WRAPPERS:
-        index = next((i for i, w in enumerate(words[1:], 1) if os.path.basename(w) in WRITERS), None)
-        if index is None:
-            return []
-        words = words[index:]
+    words = unwrap(words)
+    if not words:
+        return []
     prog = os.path.basename(words[0])
     if prog in SHELLS:
         # -c alone or combined with other flags (-lc, -ec): the next word is the command

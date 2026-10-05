@@ -310,6 +310,9 @@ class ShellWrites(unittest.TestCase):
             "stdbuf -o L tee stdbuf2.txt": [("Write", "stdbuf2.txt")],
             "git restore .env": [("Write", ".env"), ("Edit", ".env")],
             "git restore --source HEAD~1 -- a.py": [("Write", "a.py"), ("Edit", "a.py")],
+            "git -C sub restore .env": [("Write", "sub/.env"), ("Edit", "sub/.env")],
+            "git -C /secret -C sub -c core.x=1 restore a": [("Write", "/secret/sub/a"), ("Edit", "/secret/sub/a")],
+            "git -C sub checkout -- c.py": [("Write", "sub/c.py")],
             "for d in a; do cd /secret; done; echo x > .env": [("Write", "/secret/.env"), ("Write", ".env")],
         }
         for command, expected in cases.items():

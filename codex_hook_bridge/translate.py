@@ -576,10 +576,30 @@ def segment_targets(words: List[str], folder: str, depth: int = 0) -> List[Tuple
             return shell_targets(script[0], folder, depth + 1)   # absolute already, so they resolve to themselves
     if prog == "eval":
         return shell_targets(" ".join(words[1:]), folder, depth + 1)
-    if prog == "git" and len(words) > 2 and words[1] == "restore":
-        # both, so a guard on either tool sees a restore; it rewrites the file like a Write
-        return [(tool, p) for p in restored_paths(words) for tool in ("Write", "Edit")]
+    if prog == "git":
+        words, git_folder = git_command(words)
+        if len(words) > 2 and words[1] == "restore":
+            # both, so a guard on either tool sees a restore; it rewrites the file like a Write
+            return [(tool, os.path.join(git_folder, p)) for p in restored_paths(words) for tool in ("Write", "Edit")]
+        if len(words) > 2 and words[1] == "checkout" and "--" in words:
+            return [("Write", os.path.join(git_folder, p)) for p in words[words.index("--") + 1:]]
+        return []
     return [("Write", p) for p in _written(prog, words)]
+
+
+def git_command(words: List[str]) -> Tuple[List[str], str]:
+    """`git ...` with git's own options before the subcommand removed, and the
+    folder its `-C` options move it to ("" when none), against which the
+    subcommand's paths resolve."""
+    rest, folder = words[1:], ""
+    while rest and rest[0].startswith("-"):
+        if rest[0] in ("-C", "-c") and len(rest) > 1:
+            if rest[0] == "-C":
+                folder = os.path.join(folder, rest[1])   # each -C is relative to the one before
+            rest = rest[2:]
+        else:
+            rest = rest[1:]
+    return words[:1] + rest, folder
 
 
 def _written(prog: str, words: List[str]) -> List[str]:
@@ -618,8 +638,6 @@ def _written(prog: str, words: List[str]) -> List[str]:
             # so a guard written either way (`secret`, `secret/`) matches
             return [v for folder in values for v in (folder.rstrip("/") or "/", folder.rstrip("/") + "/")]
         return values
-    if prog == "git" and len(words) > 2 and words[1] == "checkout" and "--" in words:
-        return words[words.index("--") + 1:]
     return []
 
 

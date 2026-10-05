@@ -178,11 +178,12 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 
 # On the masked command (see mask()), so a `cd` inside quotes or a heredoc
 # body is not one: a parenthesis, or a cd at the start of a simple command,
-# past its -L/-P options and `--`. A cd with no folder goes home.
+# past its -L/-P options and `--`. A cd with no folder goes home; one whose
+# folder starts with a backquote is read as running a command for it.
 FOLDER_RX = re.compile(
     r"[()`]|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
     r"cd(?:[ \t]+-[LPe@]+)*(?:[ \t]+--)?"
-    r"(?:[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)`\n])))", re.M)
+    r"(?:[ \t]+('[^']*'|\"[^\"]*\"|`|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
 
 
 def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[str, ...]]:
@@ -198,6 +199,7 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
     masked = masked or mask(command)
     here: Tuple[str, ...] = (cwd,)
     stack, offsets, values = [here], [0], [here]
+    seen = {cwd: None}   # every folder this command may have been in, for a cd whose folder is not known
     opened = [""]   # what opened each level of the stack: "(" or "`"
     for m in FOLDER_RX.finditer(masked):
         if m.group() == "(" or (m.group() == "`" and opened[-1] != "`"):
@@ -209,7 +211,11 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
                 opened.pop()
         elif m.group(1) is None:
             stack[-1] = (os.path.expanduser("~"),)
-        elif command[m.start(1):m.end(1)] != "-":   # `cd -`: the previous folder, not known here
+        elif unknown_folder(expand_home(command[m.start(1):m.end(1)])):
+            # `cd "$PWD"`, `cd -`, `cd "$(git rev-parse --show-toplevel)"`: the folder is only
+            # known when the command runs, so every folder it may have been in still counts
+            stack[-1] = tuple(dict.fromkeys(stack[-1] + tuple(seen)))
+        else:
             target = expand_home(command[m.start(1):m.end(1)])
             moved = tuple(dict.fromkeys(absolute(target, f) for f in stack[-1]))
             if any(len(f) > FOLDER_MAX for f in moved):
@@ -222,12 +228,19 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
             next_runs_anyway = after[:1] in (";", "\n") or after == "||" or (after[:1] == "&" and after != "&&")
             may_fail = next_runs_anyway and not all(os.path.isdir(f) for f in moved)
             stack[-1] = tuple(dict.fromkeys(moved + stack[-1])) if may_fail else moved
-            if len(stack[-1]) > FOLDERS_MAX:
-                raise Untranslatable("this command's cds into folders that may not exist leave more than %d "
-                                     "folders it could be in, which the bridge does not follow" % FOLDERS_MAX)
+        if len(stack[-1]) > FOLDERS_MAX:
+            raise Untranslatable("this command's cds into folders that may not exist leave more than %d "
+                                 "folders it could be in, which the bridge does not follow" % FOLDERS_MAX)
+        seen.update(dict.fromkeys(stack[-1]))
         offsets.append(m.end())
         values.append(stack[-1])
     return lambda offset: values[bisect.bisect_right(offsets, offset) - 1]
+
+
+def unknown_folder(target: str) -> bool:
+    """Whether a cd's folder is only known when the command runs: `-` (the
+    previous folder), or a folder holding a variable or a command's output."""
+    return target == "-" or "$" in target or "`" in target
 
 
 def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:

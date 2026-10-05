@@ -188,5 +188,48 @@ class CommandLine(unittest.TestCase):
         self.assertTrue(proc.stderr.startswith("codex-hook-bridge: stdin is not JSON"))
 
 
+
+class GuardedSession(unittest.TestCase):
+    """A session folder app/ with a guard on app/secret/, driven the way Codex
+    sends a shell call: argv ["bash", "-lc", script]."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = os.path.realpath(tmp.name)
+        self.app = os.path.join(self.root, "app")
+        for folder in ("app/secret", "app/src", "elsewhere/inner"):
+            os.makedirs(os.path.join(self.root, folder))
+        os.symlink(os.path.join(self.root, "elsewhere", "inner"), os.path.join(self.app, "l2"))
+        guard = os.path.join(self.root, "guard.py")
+        with open(guard, "w") as fh:
+            fh.write("import json, sys\npath = json.load(sys.stdin)['tool_input'].get('file_path', '')\n"
+                     "sys.exit(2 if path.startswith(%r) else 0)\n" % (os.path.join(self.app, "secret") + "/"))
+        self.settings = os.path.join(self.root, "settings.json")
+        with open(self.settings, "w") as fh:
+            json.dump({"hooks": {"PreToolUse": [{"matcher": "Write|Edit", "hooks": [
+                {"type": "command", "command": '"%s" "%s"' % (sys.executable, guard)}]}]}}, fh)
+
+    def exit_code(self, script: str) -> int:
+        payload = {"hook_event_name": "PreToolUse", "cwd": self.app, "tool_name": "shell",
+                   "tool_input": {"command": ["bash", "-lc", script]}}
+        proc = cli(["hook", "--settings", self.settings, "--state-dir", os.path.join(self.root, "state")],
+                   json.dumps(payload), env={"CLAUDE_CONFIG_DIR": os.path.join(self.root, "none")})
+        return proc.returncode
+
+    def assert_refused(self, *scripts: str) -> None:
+        for script in scripts:
+            with self.subTest(script=script):
+                self.assertEqual(self.exit_code(script), 2)
+
+    def test_a_cd_to_a_folder_known_only_when_it_runs_keeps_every_folder_seen(self) -> None:
+        self.assert_refused('cd "$(git rev-parse --show-toplevel)" && echo x > secret/k',
+                            "cd $(git rev-parse --show-toplevel) && echo x > secret/k",
+                            'cd "$PWD" && echo x > secret/k',
+                            'cd src && cd "$OLDPWD" && echo x > secret/k',
+                            "cd /tmp && cd - && echo x > secret/k",
+                            "cd `pwd` && echo x > secret/k")
+
+
 if __name__ == "__main__":
     unittest.main()

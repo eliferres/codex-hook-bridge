@@ -142,36 +142,39 @@ class Mirror(unittest.TestCase):
         self.write(["not json", "{}"])
         self.assertEqual(self.mirror(), "")
 
-    def test_copies_untouched_for_30_days_are_pruned_on_write(self) -> None:
-        old_copy = os.path.join(self.state, "old-session.jsonl")
-        old_side = os.path.join(self.state, ".state", "old-session.json")
-        old_sub = os.path.join(self.state, "old-root", "subagents", "agent-x.jsonl")
-        recent = os.path.join(self.state, "recent-session.jsonl")
-        for path in (old_copy, old_side, old_sub, recent):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as fh:
-                fh.write("{}\n")
+    def age(self, *paths: str) -> None:
         month_ago = time.time() - 31 * 86400
-        for path in (old_copy, old_side, old_sub):
+        for path in paths:
             os.utime(path, (month_ago, month_ago))
+
+    def test_copies_the_bridge_wrote_are_pruned_after_30_days_untouched(self) -> None:
+        old_log = os.path.join(self.tmp.name, "old.jsonl")
+        sub_log = os.path.join(self.tmp.name, "sub.jsonl")
+        self.write([meta("old-1"), user("hi")], path=old_log)
+        self.write([meta("sub-2", "old-1", "old-1"), brief("go")], path=sub_log)
+        old_copy, sub_copy = self.mirror(old_log), self.mirror(sub_log)
+        sides = [os.path.join(self.state, ".state", n) for n in os.listdir(os.path.join(self.state, ".state"))]
+        self.age(old_copy, sub_copy, *sides)
         self.write([meta("root-1"), user("hi")])
         self.mirror()
         self.assertFalse(os.path.exists(old_copy))
-        self.assertFalse(os.path.exists(old_side))
-        self.assertFalse(os.path.exists(os.path.join(self.state, "old-root")))
-        self.assertTrue(os.path.exists(recent))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "old-1")))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.state, ".state"))), ["root-1.json", "root-1.lock"])
         self.assertTrue(os.path.exists(os.path.join(self.state, "root-1.jsonl")))
 
     def test_pruning_leaves_files_the_bridge_did_not_write(self) -> None:
-        other = os.path.join(self.state, "notes", "old.json")
-        os.makedirs(os.path.dirname(other))
-        with open(other, "w") as fh:
-            fh.write("{}")
-        month_ago = time.time() - 31 * 86400
-        os.utime(other, (month_ago, month_ago))
+        theirs = [os.path.join(self.state, "notes", "old.json"), os.path.join(self.state, "journal.jsonl"),
+                  os.path.join(self.state, ".state", "keep.json"),
+                  os.path.join(self.state, "proj", "subagents", "agent-a.jsonl")]
+        for path in theirs:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write("{}\n")
+        self.age(*theirs)
         self.write([meta("root-1"), user("hi")])
         self.mirror()
-        self.assertTrue(os.path.exists(other))
+        for path in theirs:
+            self.assertTrue(os.path.exists(path), path)
 
     def test_an_unsafe_session_id_is_not_used_as_a_file_name(self) -> None:
         self.write([meta(".."), user("x")])

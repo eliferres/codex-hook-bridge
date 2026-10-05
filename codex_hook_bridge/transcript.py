@@ -14,8 +14,8 @@ waiting are rewritten on the next refresh. A log that shrank or was replaced
 is rebuilt from the start. Usage is mapped so that input + cache read + cache
 write equals Codex's own input_tokens, which already includes the cached part.
 
-Copies, sidecars and locks not written for 30 days are removed whenever a
-copy is written, so finished sessions do not pile up.
+Copies the bridge wrote, with their sidecars and locks, are removed once
+they go 30 days unwritten, checked whenever a copy is written.
 
 Any error returns "" and the hooks get the original path: a problem here must
 never break a tool call.
@@ -34,7 +34,7 @@ MAX_LINE = 1 << 20          # a Codex row longer than this is skipped, never par
 MAX_LOG = 200 * (1 << 20)   # a log larger than this is not mirrored
 LOCK_WAIT = 5.0             # seconds a refresh waits for a parallel refresh of the same log
 PRUNE_AGE = 30 * 86400      # seconds a copy may go unwritten before a later write removes it
-PRUNE_SUFFIXES = (".jsonl", ".json", ".lock")
+WRITER_MARK = "codex-hook-bridge"   # in every sidecar: proof the bridge wrote the copy it names
 SAFE_ID = re.compile(r"^(?!\.+$)[A-Za-z0-9._-]{1,128}$")   # never all dots: '..' would leave the folder
 # Row types only a Claude Code transcript has: a log carrying one is already Claude's.
 CLAUDE_TYPES = ("user", "assistant", "system", "summary", "attachment", "file-history-snapshot")
@@ -242,7 +242,7 @@ def _refresh(src: str, meta: dict, dest: str, side: str) -> None:
         state = saved
     else:
         head_len = min(info.st_size, 4096)
-        state = {"src": src, "ino": info.st_ino, "head": _head_hash(src, head_len), "headlen": head_len,
+        state = {"writer": WRITER_MARK, "dest": dest, "src": src, "ino": info.st_ino, "head": _head_hash(src, head_len), "headlen": head_len,
                  "offset": 0, "size": 0, "st": {"root": root, "sub": sub, "cwd": str(meta.get("cwd") or "")}}
     st = dict(state["st"])
 
@@ -294,45 +294,43 @@ def _refresh(src: str, meta: dict, dest: str, side: str) -> None:
 
 
 def prune(state_dir: str, max_age: float = PRUNE_AGE) -> None:
-    """Remove copies, sidecars and locks not written for `max_age` seconds.
+    """Remove copies the bridge wrote that have gone `max_age` seconds unwritten.
 
-    Only the layout this module writes is touched (<id>.jsonl at the top,
-    <root>/subagents/agent-*.jsonl, and .state/*), so a --state-dir pointed
-    at a shared folder never loses anything else.
+    Only what a sidecar proves the bridge wrote is touched: a sidecar in
+    .state/ carrying WRITER_MARK names its copy, and the copy, the sidecar
+    and its lock go together. Any other file in a shared --state-dir stays.
     """
     cutoff = time.time() - max_age
-
-    def stale(path: str) -> bool:
-        try:
-            return os.path.isfile(path) and os.path.getmtime(path) < cutoff
-        except OSError:
-            return False
-
-    def remove(path: str) -> None:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-
+    sides = os.path.join(state_dir, ".state")
     try:
-        top = os.listdir(state_dir)
+        names = os.listdir(sides)
     except OSError:
         return
-    for name in top:
-        path = os.path.join(state_dir, name)
-        if name.endswith(".jsonl") and SAFE_ID.match(name[:-6]) and stale(path):
-            remove(path)
-        elif name == ".state" and os.path.isdir(path):
-            for side in os.listdir(path):
-                if side.endswith(PRUNE_SUFFIXES) or ".json." in side:
-                    if stale(os.path.join(path, side)):
-                        remove(os.path.join(path, side))
-        elif SAFE_ID.match(name) and os.path.isdir(os.path.join(path, "subagents")):
-            subagents = os.path.join(path, "subagents")
-            for sub in os.listdir(subagents):
-                if sub.startswith("agent-") and sub.endswith(".jsonl") and stale(os.path.join(subagents, sub)):
-                    remove(os.path.join(subagents, sub))
-            for folder in (subagents, path):
+    for name in names:
+        side = os.path.join(sides, name)
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(side) as fh:
+                state = json.load(fh)
+            dest = state.get("dest") if isinstance(state, dict) and state.get("writer") == WRITER_MARK else None
+            if not isinstance(dest, str) or os.path.dirname(os.path.abspath(dest)) not in (
+                    os.path.abspath(state_dir), os.path.join(os.path.abspath(state_dir), str(state["st"]["root"]),
+                                                             "subagents")):
+                continue
+            newest = max(os.path.getmtime(p) for p in (side, dest) if os.path.exists(p))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if newest >= cutoff:
+            continue
+        dest = os.path.abspath(dest)
+        for path in (dest, side, side[:-5] + ".lock"):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        for folder in (os.path.dirname(dest), os.path.dirname(os.path.dirname(dest))):
+            if folder != os.path.abspath(state_dir):
                 try:
                     os.rmdir(folder)   # only succeeds once empty
                 except OSError:

@@ -185,7 +185,8 @@ session log under `$XDG_STATE_HOME/codex-hook-bridge/transcripts` (or
 `--state-dir`), refreshed incrementally, and passes that path instead. Token
 usage is mapped so input plus cache read equals Codex's own input count.
 Copies not written for 30 days are deleted the next time any copy is
-written; only files in the layout the bridge writes are touched.
+written. Only a copy named by one of the bridge's own marked sidecar files is
+ever deleted, so other files in a shared `--state-dir` are left alone.
 
 ## Limitations
 

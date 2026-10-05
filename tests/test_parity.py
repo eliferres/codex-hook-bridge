@@ -66,6 +66,42 @@ class Reach(unittest.TestCase):
         self.assertEqual(status(route("BeforeLunch", ""))[0], "unaccounted")
 
 
+class Budget(unittest.TestCase):
+    def test_a_timeout_longer_than_the_budget_is_over_budget_and_fails(self) -> None:
+        findings = check([route("PreToolUse", "Bash", timeout=60)])
+        self.assertEqual(findings[0].status, "over-budget")
+        self.assertIn("60", findings[0].reason)
+        self.assertTrue(failed(findings))
+
+    def test_a_timeout_inside_the_budget_or_none_set_is_reached(self) -> None:
+        for handler in ({"timeout": 10}, {}):
+            with self.subTest(handler=handler):
+                self.assertEqual(status(route("PreToolUse", "Bash", **handler))[0], "reached")
+
+    def test_the_budget_can_be_named_and_session_end_has_its_own_short_one(self) -> None:
+        self.assertEqual(check([route("PreToolUse", "Bash", timeout=60)], budget=90)[0].status, "reached")
+        self.assertEqual(status(route("SessionEnd", "", timeout=5))[0], "over-budget")
+
+    def test_an_over_budget_route_can_be_accepted(self) -> None:
+        accepted = [{"event": "PreToolUse", "matcher": "Bash", "command": "check.sh", "reason": "slow but advisory"}]
+        findings = check([route("PreToolUse", "Bash", timeout=60)], accepted)
+        self.assertEqual((findings[0].status, findings[0].reason), ("accepted", "slow but advisory"))
+        self.assertFalse(failed(findings))
+
+    def test_the_command_takes_the_same_budget_option_as_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = os.path.join(tmp, "settings.json")
+            with open(settings, "w") as fh:
+                json.dump({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+                    {"type": "command", "command": "slow.sh", "timeout": 60}]}]}}, fh)
+            base = [sys.executable, "-m", "codex_hook_bridge", "parity", "--settings", settings]
+            proc = subprocess.run(base, capture_output=True, text=True, cwd=ROOT)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("OVER-BUDGET", proc.stdout)
+            proc = subprocess.run(base + ["--budget", "90"], capture_output=True, text=True, cwd=ROOT)
+            self.assertEqual(proc.returncode, 0)
+
+
 class AcceptFile(unittest.TestCase):
     def test_an_accepted_route_counts_as_accounted_with_its_reason(self) -> None:
         accepted = [{"event": "PreToolUse", "matcher": "Deploy", "command": "check.sh", "reason": "our own tool"}]

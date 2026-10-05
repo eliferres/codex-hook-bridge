@@ -95,7 +95,8 @@ write, `codex_derived`.
 codex-hook-bridge hook      [--settings FILE]... [--project-dir DIR] [--event NAME]
                             [--budget SECONDS] [--state-dir DIR]        < payload
 codex-hook-bridge translate [--json]                                    < payload
-codex-hook-bridge parity    [--settings FILE]... [--project-dir DIR] [--accept FILE] [--json]
+codex-hook-bridge parity    [--settings FILE]... [--project-dir DIR] [--accept FILE]
+                            [--budget SECONDS] [--json]
 codex-hook-bridge --version
 ```
 
@@ -109,11 +110,16 @@ seconds (default 25, which leaves room inside the 30-second timeout above).
 each, or in full with `--json`. It runs nothing.
 
 `parity` lists every hook route and its status: `reached` (with what reaches
-it), `unreachable` (with the reason), `accepted` (with your reason) or
-`unaccounted`. An accept file is a JSON list of
-`{"event", "matcher", "command", "reason"}` objects for routes you know Codex
-cannot reach. An accepted route that Codex can in fact reach, or one that is
-no longer in the settings, is reported too.
+it), `unreachable` (with the reason), `over-budget`, `accepted` (with your
+reason) or `unaccounted`. A route is `over-budget` when its own `timeout` is
+longer than the bridge's budget (`--budget`, default 25 seconds; 2.5 on
+`SessionEnd`): a hook still running then is stopped, and like any timed-out
+hook it does not block, so the call proceeds as if it had allowed it. A hook
+with no `timeout` set is not flagged; it simply has the budget to finish in.
+An accept file is a JSON list of `{"event", "matcher", "command", "reason"}`
+objects for routes you know Codex cannot reach, or that you accept may be
+cut short. An accepted route that Codex can in fact reach, or one that is no
+longer in the settings, is reported too.
 
 | Command | Exit | Meaning |
 |---|---|---|
@@ -121,7 +127,7 @@ no longer in the settings, is reported too.
 | `hook` | 2 | refused; the hooks' reasons are on stderr, or the bridge's own when a command was too long to read |
 | `hook` | 1 | the bridge itself could not run (a bad option, a `--settings` file that does not exist, a payload that is not JSON, an internal error); one line on stderr, and Codex proceeds |
 | `parity` | 0 | every route reached, unreachable for a known reason, or accepted |
-| `parity` | 1 | at least one route unaccounted, or the accept file has drifted |
+| `parity` | 1 | at least one route unaccounted or over budget, or the accept file has drifted |
 | `parity`, `translate` | 2 | usage or configuration error, or (`translate`) a command too long to read; one line on stderr |
 
 `hook` writes its own failures as exit 1, not 2, on purpose: Codex reads exit
@@ -194,7 +200,9 @@ such a command into shorter ones.
 that times out or exits with anything but 0 or 2 is a non-blocking error.
 Each such hook is named on stderr, including one whose command could not
 start, so a broken path never passes unnoticed. Each hook runs in its own process group, so a timeout also stops whatever it
-started.
+started. A guard that needs longer than the budget would let calls through
+when it is slow, so `parity` flags any hook whose `timeout` is longer than
+the budget.
 
 **Transcripts are converted.** Hooks that open `transcript_path` expect
 Claude Code's JSON-lines rows. The bridge keeps a converted copy of the Codex

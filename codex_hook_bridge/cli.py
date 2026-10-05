@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from . import __version__
 from . import parity
-from .dispatch import run_hook
+from .dispatch import DEFAULT_BUDGET, run_hook
 from .settings import SettingsError, load_routes
 from .transcript import default_state_dir, mirror
 from .translate import Untranslatable, translate
@@ -95,7 +95,7 @@ def cmd_translate(args: argparse.Namespace) -> int:
 def cmd_parity(args: argparse.Namespace) -> int:
     routes = load_routes(args.settings, _project_dir(args))
     accepted = parity.load_accepted(args.accept) if args.accept else None
-    findings = parity.check(routes, accepted)
+    findings = parity.check(routes, accepted, args.budget)
     print(parity.as_json(findings) if args.json else parity.render(findings))
     return 1 if parity.failed(findings) else 0
 
@@ -117,7 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     hook = sub.add_parser("hook", help="run as a Codex hook: payload on stdin, reply on stdout and exit code")
     settings_options(hook)
     hook.add_argument("--event", help="event name when the payload lacks hook_event_name")
-    hook.add_argument("--budget", type=float, default=25.0, metavar="SECONDS",
+    hook.add_argument("--budget", type=float, default=DEFAULT_BUDGET, metavar="SECONDS",
                       help="time for all hooks of one call together (default 25; keep it under "
                            "the timeout set on the Codex hook)")
     hook.add_argument("--state-dir", default=default_state_dir(), metavar="DIR",
@@ -133,6 +133,8 @@ def build_parser() -> argparse.ArgumentParser:
     settings_options(par)
     par.add_argument("--accept", metavar="FILE",
                      help="JSON list of {event, matcher, command, reason} for routes you know Codex cannot reach")
+    par.add_argument("--budget", type=float, default=DEFAULT_BUDGET, metavar="SECONDS",
+                     help="the hook command's --budget; a hook whose timeout is longer is flagged (default 25)")
     par.add_argument("--json", action="store_true", help="print the report as JSON")
     par.set_defaults(func=cmd_parity)
     return parser

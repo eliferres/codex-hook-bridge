@@ -38,6 +38,7 @@ CONTEXT_EVENTS = ("PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit
 # Events where Claude Code adds a hook's plain-text stdout to the model's context.
 PLAIN_TEXT_CONTEXT_EVENTS = ("SessionStart", "UserPromptSubmit")
 DEFAULT_HANDLER_TIMEOUT = 600.0   # seconds, Claude Code's default for a command hook
+DEFAULT_BUDGET = 25.0             # seconds for all hooks of one call, inside Codex's 30-second hook timeout
 SESSION_END_BUDGET = 2.5          # Codex allows SessionEnd hooks three seconds at most
 ASK_NOTE = "[the hook asked for approval; Codex hooks have no approval prompt, so the call is refused] "
 
@@ -208,7 +209,7 @@ def hook_env(payload: dict, project_dir: str = "") -> dict:
 
 
 def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
-             budget: float = 25.0, transcript_path: str = "", project_dir: str = "") -> Answer:
+             budget: float = DEFAULT_BUDGET, transcript_path: str = "", project_dir: str = "") -> Answer:
     """Translate one Codex hook payload, run every matching Claude Code hook in
     parallel inside `budget` seconds, and return the reply for Codex.
 

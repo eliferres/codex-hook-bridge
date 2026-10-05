@@ -6,7 +6,9 @@ Every route in the settings gets one status:
   unreachable  it cannot be reached, for a reason this tool knows (an event
                Codex never fires, a Claude Code tool with no Codex twin, a
                handler type the bridge does not run)
-  accepted     it cannot be reached and the accept file says why
+  over-budget  it is reached, but its timeout is longer than the bridge's time
+               budget, so a run that long is stopped and the call proceeds
+  accepted     it cannot be reached, or is over budget, and the accept file says why
   unaccounted  none of the above: nobody has said what happens to it
 
 An accept file entry that a Codex call can in fact reach, or that names a
@@ -18,7 +20,7 @@ from __future__ import annotations
 import json
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-from .dispatch import BRIDGED_EVENTS, TOOL_EVENTS
+from .dispatch import BRIDGED_EVENTS, DEFAULT_BUDGET, SESSION_END_BUDGET, TOOL_EVENTS
 from .settings import Route, SettingsError
 from .translate import CLAUDE_TOOLS, MATCH_ALL, matcher_error, matcher_fits
 
@@ -66,7 +68,9 @@ CLAUDE_ONLY_TOOLS: Dict[str, str] = {
 NOT_READ = ["managed policy settings", "plugin hooks", "skill and subagent frontmatter hooks"]
 
 REACHED, UNREACHABLE, ACCEPTED, UNACCOUNTED = "reached", "unreachable", "accepted", "unaccounted"
+OVER_BUDGET = "over-budget"
 STALE, GONE = "stale-acceptance", "gone"
+FAILING = (UNACCOUNTED, OVER_BUDGET, STALE, GONE)
 
 
 class Finding(NamedTuple):
@@ -115,6 +119,21 @@ def reach(event: str, matcher: str, handler: dict) -> Tuple[str, str]:
     return UNACCOUNTED, "matches no tool a Codex call is translated to"
 
 
+def over_budget(event: str, handler: dict, budget: float) -> str:
+    """Why a reached hook's own timeout outlasts the bridge's budget, or "".
+    A hook with no timeout set is not flagged: it runs inside the budget
+    like any other, and only one that needs longer is cut short."""
+    try:
+        timeout = float(handler.get("timeout") or 0)
+    except (TypeError, ValueError):
+        return ""
+    allowed = min(budget, SESSION_END_BUDGET) if event == "SessionEnd" else budget
+    if timeout <= allowed:
+        return ""
+    return ("its timeout is %gs but the bridge gives all hooks of one call %gs; a run that long is "
+            "stopped and the call proceeds as if the hook had allowed it" % (timeout, allowed))
+
+
 def load_accepted(path: str) -> List[dict]:
     """The accept file: a JSON list of {event, matcher, command, reason}."""
     try:
@@ -133,8 +152,10 @@ def _key(event: str, matcher: str, command: str) -> Tuple[str, str, str]:
     return (event, matcher or "", command)
 
 
-def check(routes: List[Route], accepted: Optional[List[dict]] = None) -> List[Finding]:
-    """One finding per route, in settings order, then one per stale or gone acceptance."""
+def check(routes: List[Route], accepted: Optional[List[dict]] = None,
+          budget: float = DEFAULT_BUDGET) -> List[Finding]:
+    """One finding per route, in settings order, then one per stale or gone
+    acceptance. `budget` is the hook command's --budget."""
     reasons = {_key(str(e.get("event", "")), str(e.get("matcher") or ""), str(e.get("command", ""))): str(e["reason"])
                for e in accepted or []}
     findings, present = [], set()
@@ -143,6 +164,9 @@ def check(routes: List[Route], accepted: Optional[List[dict]] = None) -> List[Fi
         key = _key(r.event, r.matcher, command)
         present.add(key)
         status, reason = reach(r.event, r.matcher, r.handler)
+        late = over_budget(r.event, r.handler, budget) if status == REACHED else ""
+        if late:
+            status, reason = OVER_BUDGET, late
         if key in reasons:
             if status == REACHED:
                 findings.append(Finding(STALE, r.event, r.matcher, command,
@@ -157,22 +181,22 @@ def check(routes: List[Route], accepted: Optional[List[dict]] = None) -> List[Fi
 
 
 def failed(findings: List[Finding]) -> bool:
-    """Whether any route is unaccounted or the accept file has drifted."""
-    return any(f.status in (UNACCOUNTED, STALE, GONE) for f in findings)
+    """Whether any route is unaccounted or over budget, or the accept file has drifted."""
+    return any(f.status in FAILING for f in findings)
 
 
 def render(findings: List[Finding]) -> str:
     """The human report: one block per route, then a count line."""
     lines = []
     for f in findings:
-        label = f.status.upper() if f.status in (UNACCOUNTED, STALE, GONE) else f.status
+        label = f.status.upper() if f.status in FAILING else f.status
         matcher = " [%s]" % f.matcher if f.matcher else ""
         lines.append("%-12s %s%s: %s" % (label, f.event, matcher, f.command))
         lines.append("%-12s %s" % ("", f.reason))
     counts = {}
     for f in findings:
         counts[f.status] = counts.get(f.status, 0) + 1
-    order = (REACHED, UNREACHABLE, ACCEPTED, UNACCOUNTED, STALE, GONE)
+    order = (REACHED, UNREACHABLE, ACCEPTED, OVER_BUDGET, UNACCOUNTED, STALE, GONE)
     summary = ", ".join("%d %s" % (counts[s], s) for s in order if s in counts)
     total = sum(f.status != GONE for f in findings)
     lines.append("%d route%s: %s (managed-policy and plugin hooks are not read)"

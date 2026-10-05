@@ -191,7 +191,7 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
 
     Every `cd` moves it; a cd inside a subshell, `( ... )`, `$( ... )` or a
     backquoted command, holds only until that subshell closes. A cd into a folder that does not
-    exist yet, followed by `;` or a newline, may fail and leave the shell
+    exist yet, followed by `;`, a newline, `||` or `&`, may fail and leave the shell
     where it was while the next command still runs, so both folders count
     from there on.
     """
@@ -216,8 +216,11 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
                 # each cd deeper costs more to follow; past this the path is not a real folder
                 raise Untranslatable("a cd in this command leads to a folder path over %d characters long, "
                                      "which the bridge does not follow" % FOLDER_MAX)
-            after = masked[m.end():m.end() + 64].lstrip(" \t")[:1]
-            may_fail = after in (";", "\n") and not all(os.path.isdir(f) for f in moved)
+            after = masked[m.end():m.end() + 64].lstrip(" \t")[:2]
+            # only `&&` holds the next command back when the cd fails; `;`, a newline,
+            # `||` and a background `&` all let it run
+            next_runs_anyway = after[:1] in (";", "\n") or after == "||" or (after[:1] == "&" and after != "&&")
+            may_fail = next_runs_anyway and not all(os.path.isdir(f) for f in moved)
             stack[-1] = tuple(dict.fromkeys(moved + stack[-1])) if may_fail else moved
             if len(stack[-1]) > FOLDERS_MAX:
                 raise Untranslatable("this command's cds into folders that may not exist leave more than %d "

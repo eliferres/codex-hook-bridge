@@ -248,13 +248,18 @@ class ShellWrites(unittest.TestCase):
                 out = translate(codex("Bash", {"command": command}))
                 self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], expected)
 
-    def test_a_cd_that_may_fail_before_a_semicolon_or_newline_reports_both_folders(self) -> None:
+    def test_a_cd_that_may_fail_reports_both_folders_unless_and_and_follows(self) -> None:
         patch = "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: k\n+x\n*** End Patch\nEOF"
         for sep in (" ; ", "\n"):
             with self.subTest(sep=sep):
                 out = translate(codex("Bash", {"command": "cd /nowhere" + sep + "echo x > f.txt" + sep + patch}))
                 self.assertEqual(sorted(p["tool_input"]["file_path"] for p in out[1:]),
                                  ["/nowhere/f.txt", "/nowhere/k", "/work/app/f.txt", "/work/app/k"])
+        for sep in (" || ", " & "):
+            with self.subTest(sep=sep):
+                out = translate(codex("Bash", {"command": "cd /nowhere" + sep + "echo x > f.txt"}))
+                self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]],
+                                 ["/nowhere/f.txt", "/work/app/f.txt"])
         # after && the next command runs only if the cd worked, and a folder that exists is entered
         out = translate(codex("Bash", {"command": "cd /nowhere && echo x > f.txt"}))
         self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], ["/nowhere/f.txt"])

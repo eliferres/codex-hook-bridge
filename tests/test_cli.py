@@ -80,11 +80,22 @@ class CommandLine(unittest.TestCase):
                    env={"CLAUDE_CONFIG_DIR": os.path.join(self.tmp.name, "none")})
         self.assertEqual((proc.returncode, proc.stderr), (2, "guarded\n"))
 
-    def test_a_broken_settings_file_in_hook_mode_is_one_line_and_exit_1(self) -> None:
+    def test_a_broken_settings_file_in_hook_mode_is_skipped_and_named_and_the_others_still_guard(self) -> None:
+        broken = os.path.join(self.tmp.name, "broken.json")
+        with open(broken, "w") as fh:
+            fh.write("{oops")
+        payload = {"hook_event_name": "PreToolUse", "cwd": self.tmp.name, "tool_name": "Bash",
+                   "tool_input": {"command": "ls"}}
+        proc = cli(["hook", "--settings", broken, "--settings", self.settings], json.dumps(payload))
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("refused by guard", proc.stderr)
+        self.assertIn("broken.json is not valid JSON", proc.stderr)
+
+    def test_a_broken_settings_file_alone_is_named_and_the_call_proceeds(self) -> None:
         with open(self.settings, "w") as fh:
             fh.write("{oops")
         proc = cli(["hook", "--settings", self.settings], '{"hook_event_name": "Stop"}')
-        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(proc.returncode, 0)
         self.assertEqual(len(proc.stderr.splitlines()), 1)
         self.assertIn("is not valid JSON", proc.stderr)
 

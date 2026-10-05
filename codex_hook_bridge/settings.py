@@ -54,12 +54,40 @@ def _load(path: str) -> dict:
     return data
 
 
-def load_routes(explicit: Optional[List[str]] = None, project_dir: str = ".") -> List[Route]:
+def _file_routes(path: str, data: dict) -> List[Route]:
+    routes: List[Route] = []
+    for event, groups in data.get("hooks", {}).items():
+        if not isinstance(groups, list):
+            raise SettingsError("%s: hooks.%s is not a list" % (path, event))
+        # A malformed entry fails its whole file, never just itself: an entry
+        # dropped without a word is a guard that silently allows.
+        for n, group in enumerate(groups):
+            where = "%s: hooks.%s[%d]" % (path, event, n)
+            if not isinstance(group, dict):
+                raise SettingsError("%s is not an object" % where)
+            matcher = group.get("matcher") or ""
+            if not isinstance(matcher, str):
+                raise SettingsError("%s.matcher is not a string" % where)
+            handlers = group.get("hooks") or []
+            if not isinstance(handlers, list):
+                raise SettingsError("%s.hooks is not a list" % where)
+            for handler in handlers:
+                if not isinstance(handler, dict):
+                    raise SettingsError("%s.hooks has an entry that is not an object" % where)
+                routes.append(Route(event, matcher, handler, path))
+    return routes
+
+
+def load_routes(explicit: Optional[List[str]] = None, project_dir: str = ".",
+                skipped: Optional[List[str]] = None) -> List[Route]:
     """Every hook route across the settings files, in file order then file position.
 
     Explicit files must exist. Default files are read when present and skipped
-    when absent, as Claude Code does. `disableAllHooks` takes its value from
-    the highest-precedence file that sets it; true switches every route off.
+    when absent, as Claude Code does. A file that exists but cannot be read as
+    settings raises, unless `skipped` is given: then, as in Claude Code, that
+    file alone is left out and the reason appended to `skipped`, and every
+    other file's hooks still load. `disableAllHooks` takes its value from the
+    highest-precedence file that sets it; true switches every route off.
     """
     if explicit:
         files = [(path, True) for path in explicit]
@@ -68,30 +96,21 @@ def load_routes(explicit: Optional[List[str]] = None, project_dir: str = ".") ->
     routes: List[Route] = []
     disabled = False
     for path, required in files:
-        if not required and not os.path.exists(path):
+        if not os.path.exists(path):
+            if required:
+                raise SettingsError("cannot read %s: no such file" % path)
             continue
-        data = _load(path)
+        try:
+            data = _load(path)
+            file_routes = _file_routes(path, data)
+        except SettingsError as exc:
+            if skipped is None:
+                raise
+            skipped.append(str(exc))
+            continue
         if isinstance(data.get("disableAllHooks"), bool):
             disabled = data["disableAllHooks"]   # later files take precedence, as in Claude Code
-        for event, groups in data.get("hooks", {}).items():
-            if not isinstance(groups, list):
-                raise SettingsError("%s: hooks.%s is not a list" % (path, event))
-            # A malformed entry is an error, never skipped: a guard that is
-            # silently dropped is a guard that silently allows.
-            for n, group in enumerate(groups):
-                where = "%s: hooks.%s[%d]" % (path, event, n)
-                if not isinstance(group, dict):
-                    raise SettingsError("%s is not an object" % where)
-                matcher = group.get("matcher") or ""
-                if not isinstance(matcher, str):
-                    raise SettingsError("%s.matcher is not a string" % where)
-                handlers = group.get("hooks") or []
-                if not isinstance(handlers, list):
-                    raise SettingsError("%s.hooks is not a list" % where)
-                for handler in handlers:
-                    if not isinstance(handler, dict):
-                        raise SettingsError("%s.hooks has an entry that is not an object" % where)
-                    routes.append(Route(event, matcher, handler, path))
+        routes += file_routes
     return [] if disabled else routes
 
 

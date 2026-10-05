@@ -47,7 +47,11 @@ def _project_dir(args: argparse.Namespace, payload: Optional[dict] = None) -> st
 def cmd_hook(args: argparse.Namespace) -> int:
     payload = _read_payload()
     project = _project_dir(args, payload)
-    routes = load_routes(args.settings, project)
+    skipped: List[str] = []
+    routes = load_routes(args.settings, project, skipped)
+    for problem in skipped:
+        # named, never silent, but the other files' guards still run
+        sys.stderr.write("%s: %s; that file's hooks did not run\n" % (PROG, problem))
     transcript = mirror(payload, args.state_dir)
     reply = run_hook(payload, routes, event=args.event, budget=args.budget, transcript_path=transcript,
                      project_dir=project)

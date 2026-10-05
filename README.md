@@ -119,14 +119,20 @@ no longer in the settings, is reported too.
 |---|---|---|
 | `hook` | 0 | proceed; any context or warning is JSON on stdout |
 | `hook` | 2 | refused; the hooks' reasons are on stderr |
-| `hook` | 1 | the bridge itself could not run (a bad option, unreadable settings, a payload that is not JSON, an internal error); one line on stderr, and Codex proceeds |
+| `hook` | 1 | the bridge itself could not run (a bad option, a `--settings` file that does not exist, a payload that is not JSON, an internal error); one line on stderr, and Codex proceeds |
 | `parity` | 0 | every route reached, unreachable for a known reason, or accepted |
 | `parity` | 1 | at least one route unaccounted, or the accept file has drifted |
 | `parity`, `translate` | 2 | usage or configuration error, one line on stderr |
 
 `hook` writes its own failures as exit 1, not 2, on purpose: Codex reads exit
-2 as a refusal, and on `Stop` as "keep going", so a typo in a settings file
-would otherwise block every tool call or loop the session.
+2 as a refusal, and on `Stop` as "keep going", so a mistyped option would
+otherwise block every tool call or loop the session.
+
+A settings file that exists but is not valid settings (broken JSON, a
+malformed hooks entry) is skipped on its own, as Claude Code skips it: `hook`
+names the file and the problem on stderr and still runs every other file's
+hooks, so one bad file never switches off the guards in the others. `parity`
+reports the same file as an error and exits 2.
 
 Hooks run with the bridge's environment plus `CLAUDE_PROJECT_DIR` (the
 project folder: `--project-dir` when given, else the payload's `cwd`) and

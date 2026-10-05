@@ -86,6 +86,22 @@ class Merging(unittest.TestCase):
                 self.assertIn("m%d.json" % i, str(caught.exception))
                 self.assertEqual(len(str(caught.exception).splitlines()), 1)
 
+    def test_when_asked_a_broken_file_is_skipped_and_named_and_the_rest_still_load(self) -> None:
+        write(os.path.join(self.user, "settings.json"), hooks("PreToolUse", "Bash", "user.sh"))
+        write(os.path.join(self.project, ".claude", "settings.json"), "{not json")
+        write(os.path.join(self.project, ".claude", "settings.local.json"),
+              {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": "exit 2"}]}, "disableAllHooks": True})
+        skipped: list = []
+        routes = load_routes(None, self.project, skipped)
+        self.assertEqual([r.handler["command"] for r in routes], ["user.sh"])
+        self.assertEqual(len(skipped), 2)
+        self.assertIn("settings.json is not valid JSON", skipped[0])
+        self.assertIn("settings.local.json: hooks.PreToolUse[0].hooks is not a list", skipped[1])
+
+    def test_an_explicit_file_that_is_missing_is_an_error_even_when_skipping(self) -> None:
+        with self.assertRaises(SettingsError):
+            load_routes([os.path.join(self.tmp.name, "nope.json")], skipped=[])
+
     def test_a_group_without_a_matcher_matches_with_an_empty_string(self) -> None:
         path = write(os.path.join(self.tmp.name, "s.json"),
                      {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}})

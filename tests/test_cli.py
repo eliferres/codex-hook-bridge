@@ -99,6 +99,15 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(len(proc.stderr.splitlines()), 1)
         self.assertIn("is not valid JSON", proc.stderr)
 
+    def test_translate_refuses_a_command_too_long_to_read_in_one_line_and_exit_2(self) -> None:
+        from codex_hook_bridge.translate import COMMAND_MAX
+        payload = {"tool_name": "Bash", "tool_input": {"command": "x" * (COMMAND_MAX + 1)}}
+        proc = cli(["translate"], json.dumps(payload))
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(len(proc.stderr.splitlines()), 1)
+        self.assertIn("characters long", proc.stderr)
+        self.assertNotIn("internal error", proc.stderr)
+
     def test_odd_tool_inputs_never_produce_a_traceback(self) -> None:
         for tool_input in ({"open": ["https://example.com"]}, {"search_query": "plain"}):
             payload = {"hook_event_name": "PreToolUse", "tool_name": "web_search", "tool_input": tool_input}

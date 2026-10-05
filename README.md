@@ -118,11 +118,11 @@ no longer in the settings, is reported too.
 | Command | Exit | Meaning |
 |---|---|---|
 | `hook` | 0 | proceed; any context or warning is JSON on stdout |
-| `hook` | 2 | refused; the hooks' reasons are on stderr |
+| `hook` | 2 | refused; the hooks' reasons are on stderr, or the bridge's own when a command was too long to read |
 | `hook` | 1 | the bridge itself could not run (a bad option, a `--settings` file that does not exist, a payload that is not JSON, an internal error); one line on stderr, and Codex proceeds |
 | `parity` | 0 | every route reached, unreachable for a known reason, or accepted |
 | `parity` | 1 | at least one route unaccounted, or the accept file has drifted |
-| `parity`, `translate` | 2 | usage or configuration error, one line on stderr |
+| `parity`, `translate` | 2 | usage or configuration error, or (`translate`) a command too long to read; one line on stderr |
 
 `hook` writes its own failures as exit 1, not 2, on purpose: Codex reads exit
 2 as a refusal, and on `Stop` as "keep going", so a mistyped option would
@@ -173,11 +173,21 @@ patterns (see Limitations). Lifecycle
 events match on their own field (`source` for `SessionStart`, `trigger` for
 compaction, `agent_type` for subagents, `reason` for `SessionEnd`).
 
-**Shell writes are found on a masked copy of the command.** Quoted spans and
-heredoc bodies are blanked first, so the `>` in `git commit -m "a > b"` is
-not a redirect; target names are then read from the original text. Each
-derived `Write` carries the text the command visibly writes (a heredoc body,
-the source file of a `cp`) so content checks have something to read.
+**Shell writes are found on a masked copy of the command.** Quoted spans,
+comments and heredoc bodies are blanked first, so the `>` in
+`git commit -m "a > b"` is not a redirect; a `$( ... )` inside double quotes
+stays visible, because the shell runs it. Target names are then read from
+the original text. Each derived `Write` carries the text the command visibly
+writes (a heredoc body, the source file of a `cp`) so content checks have
+something to read.
+
+**A command too long to read in time is refused.** Reading a command takes
+time in proportion to its length, about a second or two per million
+characters, and that time comes out of the same budget the hooks run in. A
+shell command over 1,000,000 characters, or one whose `cd`s lead to a folder
+path over 4,096 characters, is refused with exit 2 and a one-line reason
+when any hook is set for that event, rather than let through unread. Split
+such a command into shorter ones.
 
 **Timeouts and crashes do not block**, matching Claude Code, where a hook
 that times out or exits with anything but 0 or 2 is a non-blocking error.

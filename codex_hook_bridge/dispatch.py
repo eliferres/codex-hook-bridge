@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, NamedTuple, Optional, Tuple
 
 from .settings import Route, handler_key
-from .translate import matcher_error, matcher_fits, translate
+from .translate import Untranslatable, matcher_error, matcher_fits, translate
 
 TOOL_EVENTS = ("PreToolUse", "PostToolUse")
 # Events Codex fires that Claude Code also has, with the payload field each
@@ -229,7 +229,13 @@ def run_hook(payload: dict, routes: List[Route], event: Optional[str] = None,
                            "(%s); its hooks did not run" % (matcher, error))
     if event == "SessionEnd":
         budget = min(budget, SESSION_END_BUDGET)
-    jobs = jobs_for(event, payload, routes)
+    try:
+        jobs = jobs_for(event, payload, routes)
+    except Untranslatable as exc:
+        if not any(r.event == event for r in routes):
+            return Answer("", "", 0)   # no hook would have judged it either way
+        # Refused rather than passed: a call no hook could read is a call no guard checked.
+        return answer(event, ["codex-hook-bridge: %s" % exc], [], [])
     if not jobs:
         return Answer("", "".join(n + "\n" for n in notices), 0)
     env = hook_env(payload, project_dir)

@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from unittest import mock
 
-from codex_hook_bridge.translate import matcher_fits, shell_targets, translate
+from codex_hook_bridge.translate import (COMMAND_MAX, Untranslatable, matcher_fits, shell_targets,
+                                         translate)
 
 CWD = "/work/app"
 
@@ -259,6 +261,29 @@ class ShellWrites(unittest.TestCase):
                 fh.write("copied text")
             out = translate(codex("Bash", {"command": "cp src.txt dest.txt"}, cwd=tmp))
             self.assertEqual(out[1]["tool_input"]["content"], "copied text")
+
+
+class LongCommands(unittest.TestCase):
+    def test_the_longest_command_read_is_read_in_seconds_whatever_its_shape(self) -> None:
+        # each of these took minutes once, when a scan restarted at every marker or quote
+        units = {"unterminated heredoc": "cat <<EOF x\n", "heredoc marker in quotes": "echo '<<EOF'\n",
+                 "escaped quotes": "\\'", "one long word": "a", "one line of redirects": " > a",
+                 "nested parentheses": "(", "many shell patches": "apply_patch <<'EOF'\n*** Begin Patch\n"
+                 "*** Add File: a\n+x\n*** End Patch\nEOF\n"}
+        for name, unit in units.items():
+            with self.subTest(shape=name):
+                command = unit * (COMMAND_MAX // len(unit))
+                started = time.monotonic()
+                translate(codex("Bash", {"command": command}))
+                self.assertLess(time.monotonic() - started, 5.0)
+
+    def test_a_command_too_long_to_read_in_time_is_refused_not_passed(self) -> None:
+        with self.assertRaises(Untranslatable):
+            translate(codex("Bash", {"command": "x" * (COMMAND_MAX + 1)}))
+
+    def test_a_cd_chain_too_deep_to_follow_is_refused_not_passed(self) -> None:
+        with self.assertRaises(Untranslatable):
+            translate(codex("Bash", {"command": "cd a && " * 3000 + "echo x > .env"}))
 
 
 class OtherTools(unittest.TestCase):

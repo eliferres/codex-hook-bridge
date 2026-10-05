@@ -12,6 +12,7 @@ from unittest import mock
 
 from codex_hook_bridge.dispatch import run_hook
 from codex_hook_bridge.settings import Route
+from codex_hook_bridge.translate import COMMAND_MAX
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "hook.py")
 
@@ -175,6 +176,13 @@ class Dispatch(unittest.TestCase):
     def test_hooks_see_the_project_dir_and_a_bridge_marker(self) -> None:
         reply = run_hook(pre("Bash", {"command": "ls"}), [route("PreToolUse", "Bash", "e", "env")])
         self.assertEqual(json.loads(reply.stdout)["hookSpecificOutput"]["additionalContext"], "/work/app|1")
+
+    def test_a_command_too_long_to_read_is_refused_when_any_tool_hook_could_judge_it(self) -> None:
+        payload = pre("Bash", {"command": "x" * (COMMAND_MAX + 1)})
+        reply = run_hook(payload, [route("PreToolUse", "Write", "write")])
+        self.assertEqual(reply.exit_code, 2)
+        self.assertIn("characters long", reply.stderr)
+        self.assertEqual(run_hook(payload, [route("Stop", "", "stop")]).exit_code, 0)
 
     def test_an_event_codex_fires_that_the_bridge_does_not_carry_does_nothing(self) -> None:
         reply = run_hook({"hook_event_name": "Interrupt"}, [route("Interrupt", "", "i", "exit2")])

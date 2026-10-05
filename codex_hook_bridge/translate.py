@@ -19,10 +19,11 @@ renamed, `codex_derived`, saying how it was derived.
 from __future__ import annotations
 
 import bisect
+import functools
 import os
 import re
 import shlex
-from typing import Callable, Iterator, List, Optional, Tuple
+from typing import Callable, Iterator, List, NamedTuple, Optional, Tuple
 
 # Every Claude Code tool name a translation can produce. Parity uses this set
 # to decide whether a hook's matcher can ever be reached from Codex.
@@ -32,6 +33,17 @@ CLAUDE_TOOLS = (
 )
 
 Call = Tuple[str, dict, str]   # (Claude tool name, tool_input, derivation tag or "")
+
+# The longest shell command read, in characters. Reading takes time in
+# proportion to the length, a few seconds per million characters, and the
+# hooks' time budget runs from the moment the bridge starts; a command too
+# long to read in time is refused, never let through unread.
+COMMAND_MAX = 1_000_000
+FOLDER_MAX = 4096   # a cd into a longer path is not followed, and the command is refused
+
+
+class Untranslatable(Exception):
+    """A call the bridge cannot read in time; the hook refuses it rather than let it run unchecked."""
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +199,10 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], str]:
             stack[-1] = os.path.expanduser("~")
         elif command[m.start(1):m.end(1)] != "-":   # `cd -`: the previous folder, not known here
             stack[-1] = absolute(expand_home(command[m.start(1):m.end(1)]), stack[-1])
+            if len(stack[-1]) > FOLDER_MAX:
+                # each cd deeper costs more to follow; past this the path is not a real folder
+                raise Untranslatable("a cd in this command leads to a folder path over %d characters long, "
+                                     "which the bridge does not follow" % FOLDER_MAX)
         offsets.append(m.end())
         values.append(stack[-1])
     return lambda offset: values[bisect.bisect_right(offsets, offset) - 1]
@@ -213,13 +229,8 @@ def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
             return found
         k = bisect.bisect_right(body_starts, start) - 1
         opened_at = bodies[k][0] if k >= 0 and start <= bodies[k][2] else start
-        end = len(command)
-        offset = start
-        for line in command[start:].split("\n"):
-            offset += len(line) + 1
-            if line.strip() == "*** End Patch":
-                end = offset - 1
-                break
+        marker = END_PATCH_RX.search(command, start)
+        end = marker.end() if marker else len(command)
         found.append((command[start:end], where(opened_at)))
         done = end
 
@@ -233,9 +244,14 @@ def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
 # or a script string is never read as a redirect; target names are then read
 # back from the original text, quotes included.
 
-HEREDOC_RX = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n(.*?)\n\s*\2\s*$", re.S | re.M)
-QUOTED_RX = re.compile(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"")
+HEREDOC_MARK_RX = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1")
+DELIMITER_RX = re.compile(r"\w+")
+SHELL_TOKEN_RX = re.compile(r"[\\'\"`()#\n]|\$\(|<<<?")   # what changes the lexer's state outside quotes
+DOUBLE_TOKEN_RX = re.compile(r"[\\\"`]|\$\(")             # ... and inside double quotes
+END_PATCH_RX = re.compile(r"^[^\S\n]*\*\*\* End Patch[^\S\n]*$", re.M)
 REDIRECT_OP_RX = re.compile(r"(?:\d|&)?>>?\|?")
+# The word after a redirect, quotes included, up to where the shell would end it.
+REDIRECT_WORD_RX = re.compile(r"""[ \t]*((?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^\s'"\\;&|<>()])*)""")
 SEGMENT_RX = re.compile(r"[;&|\n]+")
 SOURCE_MAX = 200_000   # bytes read from a copy's source file to show what it writes
 INPLACE_PROGS = ("sed", "gsed", "perl", "ruby")
@@ -245,30 +261,150 @@ WRAPPERS = ("sudo", "env", "command", "nohup", "time", "timeout", "nice", "exec"
 SHELLS = ("bash", "sh", "zsh", "dash")
 
 
+class Scan(NamedTuple):
+    masked: str                              # the command, quoted text, comments and heredoc bodies blanked
+    heredocs: List[Tuple[int, int, int]]     # (offset of its <<, body start, body end)
+    quoted: List[Tuple[int, int]]            # (start, end) of the text inside each pair of quotes
+
+
+@functools.lru_cache(maxsize=4)
+def scan(command: str) -> Scan:
+    """Read `command` once, left to right, the way the shell splits it.
+
+    Quoted text, comments and heredoc bodies are blanked in `masked`, every
+    offset kept, so a `>` in a commit message or a script string is never a
+    redirect. A `$( ... )` or backquoted command inside double quotes stays
+    visible, because the shell runs it. A heredoc whose end line never comes,
+    and a quote that never closes, are left visible rather than hiding the
+    rest of the command. One pass, so the time grows with the length alone.
+    """
+    starts = [0] + [m.end() for m in re.finditer("\n", command)]
+    end_lines: dict = {}   # heredoc delimiter -> numbers of the lines that hold it alone
+    for n, line in enumerate(command.split("\n")):
+        if DELIMITER_RX.fullmatch(line.strip()):
+            end_lines.setdefault(line.strip(), []).append(n)
+    blank: List[Tuple[int, int, bool]] = []   # (start, end, keep newlines)
+    bodies: List[Tuple[int, int, int]] = []
+    quoted: List[Tuple[int, int]] = []
+    stack: List[list] = []     # open contexts [kind, offset, where blanking resumes]: ' " ` $( (
+    pending: List[Tuple[str, int]] = []       # heredocs whose bodies start after this line
+    i, size = 0, len(command)
+    while i < size:
+        top = stack[-1] if stack else ["", 0, 0]
+        if top[0] == "'":
+            close = command.find("'", i)
+            if close < 0:
+                break
+            stack.pop()
+            blank.append((i, close, False))
+            quoted.append((i, close))
+            i = close + 1
+            continue
+        if top[0] == '"':
+            m = DOUBLE_TOKEN_RX.search(command, i)
+            if not m:
+                break
+            if m.group() == "\\":
+                i = m.end() + 1
+                continue
+            blank.append((top[2], m.start(), False))
+            if m.group() == '"':
+                stack.pop()
+                quoted.append((top[1] + 1, m.start()))
+            else:   # $( or ` inside double quotes: the shell runs it, so it stays visible
+                stack.append([m.group(), m.start(), 0])
+            i = m.end()
+            continue
+        m = SHELL_TOKEN_RX.search(command, i)
+        if not m:
+            break
+        token, i = m.group(), m.end()
+        if token == "\\":
+            i += 1
+        elif token in ("'", '"'):
+            stack.append([token, m.start(), i])
+        elif token == "#":
+            before = command[m.start() - 1] if m.start() else " "
+            if before.isspace() or before in ";&|()":   # a comment only where a word could start
+                line_end = command.find("\n", i)
+                i = size if line_end < 0 else line_end
+                blank.append((m.start(), i, False))
+        elif token in ("$(", "("):
+            stack.append([token, m.start(), 0])
+        elif token in (")", "`"):
+            closes = ("$(", "(") if token == ")" else ("`",)
+            if top[0] in closes:
+                stack.pop()
+                if stack and stack[-1][0] == '"':
+                    stack[-1][2] = i   # back inside double quotes: blanking resumes here
+            elif token == "`":
+                stack.append([token, m.start(), 0])
+            # an unmatched `)` (a case pattern) closes nothing
+        elif token == "<<":
+            mark = HEREDOC_MARK_RX.match(command, m.start())
+            if mark:
+                pending.append((mark.group(2), m.start()))
+                i = mark.end()
+        elif token == "\n" and pending:
+            line = bisect.bisect_right(starts, m.start()) - 1
+            for word, marker in pending:
+                ends = end_lines.get(word, [])
+                k = bisect.bisect_right(ends, line)
+                if k == len(ends):
+                    continue   # never ended: left visible
+                body_start = starts[line + 1]
+                body_end = max(body_start, starts[ends[k]] - 1)
+                bodies.append((marker, body_start, body_end))
+                blank.append((body_start, body_end, True))
+                line = ends[k]
+            pending = []
+            i = starts[line + 1] if line + 1 < len(starts) else size
+    open_quotes = [offset for kind, offset, _ in stack if kind in ("'", '"')]
+    if open_quotes:
+        blank = [b for b in blank if b[0] < min(open_quotes)]   # nothing after an unclosed quote is hidden
+    out, at = [], 0
+    for start, end, keep_newlines in sorted(blank):
+        start = max(start, at)
+        if start >= end:
+            continue
+        part = command[start:end]
+        out += [command[at:start], re.sub(r"[^\n]", " ", part) if keep_newlines else " " * len(part)]
+        at = end
+    out.append(command[at:])
+    return Scan("".join(out), bodies, quoted)
+
+
 def heredocs(command: str) -> List[Tuple[int, int, int]]:
     """(offset of its `<<`, body start, body end) for each heredoc in `command`."""
-    return [(m.start(), m.start(3), m.end(3)) for m in HEREDOC_RX.finditer(command)]
+    return scan(command).heredocs
 
 
 def mask(command: str) -> str:
-    """`command` with every quoted span and heredoc body replaced by spaces of the same length."""
-    out = list(command)
-    for _, body_start, body_end in heredocs(command):
-        for i in range(body_start, body_end):
-            if command[i] != "\n":
-                out[i] = " "
-    masked = "".join(out)
-    for m in QUOTED_RX.finditer(masked):
-        for i in range(m.start() + 1, m.end() - 1):
-            out[i] = " "
-    return "".join(out)
+    """`command` with quoted text, comments and heredoc bodies replaced by spaces of the same length."""
+    return scan(command).masked
+
+
+# A shell word: quoted spans, escaped characters and plain characters run
+# together; a quote with no partner is kept as a plain character.
+SHELL_WORD_RX = re.compile(r"""(?:'[^']*'|"(?:[^"\\]|\\.)*"|\\.?|[^\s\\])+""", re.S)
+QUOTING_RX = re.compile(r"""'([^']*)'|"((?:[^"\\]|\\.)*)"|\\(.)""", re.S)
+DOUBLE_ESCAPE_RX = re.compile(r"""\\([\\"$`\n])""")
+
+
+def _unquote_word(m: "re.Match[str]") -> str:
+    single, double, escaped = m.groups()
+    if single is not None:
+        return single
+    if double is not None:
+        return DOUBLE_ESCAPE_RX.sub(lambda e: "" if e.group(1) == "\n" else e.group(1), double)
+    return "" if escaped == "\n" else escaped
 
 
 def _words(text: str) -> List[str]:
-    try:
-        return shlex.split(text, comments=False, posix=True)
-    except ValueError:   # an unbalanced quote: fall back to whitespace
-        return text.split()
+    """`text` split into words with their quotes removed, as the shell reads
+    them. A regular expression rather than shlex, whose time grows with the
+    square of a word's length."""
+    return [QUOTING_RX.sub(_unquote_word, m.group()) for m in SHELL_WORD_RX.finditer(text)]
 
 
 def _segments(command: str, masked: str = "") -> Iterator[Tuple[List[str], int]]:
@@ -293,12 +429,10 @@ def redirect_targets(command: str, masked: str = "") -> List[Tuple[str, int]]:
     masked = masked or mask(command)
     found = []
     for m in REDIRECT_OP_RX.finditer(masked):
-        rest = command[m.end():].lstrip()
-        if not rest or rest[0] in "&|;<>" or masked[m.start():m.end()].endswith("<"):
-            continue   # >&2, a descriptor duplication, or part of <<
-        first_line = rest[:rest.find("\n")] if "\n" in rest else rest
-        word = (_words(first_line) or [""])[0]
-        found.append((re.split(r"[;&|)]", word)[0], m.start()))   # `> f; ls`, `(... > f)`: not part of the name
+        word = REDIRECT_WORD_RX.match(command, m.end()).group(1)
+        if not word:
+            continue   # >&2, a descriptor duplication
+        found.append(((_words(word) or [""])[0], m.start()))
     return found
 
 
@@ -450,7 +584,7 @@ def shell_write_calls(command: str, cwd: str) -> List[Call]:
                 sources = operands[:-1] or operands
                 bodies += [t for t in (_read_small(absolute(o, where(offset))) for o in sources) if t]
     if not bodies:
-        quoted = [a or b for a, b in QUOTED_RX.findall(command)]
+        quoted = [command[start:end] for start, end in scan(command).quoted]
         if quoted:
             bodies = ["\n".join(quoted).replace("\\n", "\n")]
     content = "\n".join(bodies)
@@ -609,6 +743,10 @@ def calls(tool: str, tool_input: dict, cwd: str) -> List[Call]:
     if tool in ("Bash", "exec_command", "shell", "local_shell", "apply_patch", "write_stdin"):
         # write_stdin types into a running shell: its text is a command like any other
         command = _text(tool_input.get("chars")) if tool == "write_stdin" else _command(tool_input)
+        if len(command) > COMMAND_MAX:
+            raise Untranslatable("this command is %d characters long; the bridge reads up to %d in its time "
+                                 "budget, so it was refused unread. Split it into shorter commands."
+                                 % (len(command), COMMAND_MAX))
         if not command:
             if tool == "write_stdin":
                 return []   # nothing typed

@@ -12,7 +12,7 @@ from . import parity
 from .dispatch import run_hook
 from .settings import SettingsError, load_routes
 from .transcript import default_state_dir, mirror
-from .translate import translate
+from .translate import Untranslatable, translate
 
 PROG = "codex-hook-bridge"
 
@@ -151,7 +151,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     try:
         return args.func(args)
-    except (SettingsError, UsageError, OSError) as exc:
+    except (SettingsError, UsageError, OSError, Untranslatable) as exc:
         sys.stderr.write("%s: %s\n" % (PROG, exc))
         # Under Codex, exit 2 means "refuse" (and on Stop, "keep going"), so a
         # broken setup must not look like a hook's decision: hook mode exits 1,

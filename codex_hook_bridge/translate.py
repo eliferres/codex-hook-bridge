@@ -144,27 +144,32 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 CD_RX = re.compile(r"(?:^|[;&|\n(])\s*cd\s+('[^']*'|\"[^\"]*\"|[^\s;&|)]+)")
 
 
-def patch_in_shell(command: str, cwd: str) -> Tuple[str, str]:
-    """(apply_patch body inside a shell command, folder its paths resolve
-    against), or ("", cwd) when there is none.
+def patches_in_shell(command: str, cwd: str) -> List[Tuple[str, str]]:
+    """(apply_patch body, folder its paths resolve against) for every patch
+    inside a shell command (`apply_patch <<'EOF' ...`), in order.
 
-    The body ends at the first line whose trimmed text is the end marker, as
+    A body ends at the first line whose trimmed text is the end marker, as
     in Codex; the marker appearing inside a line of content does not end it.
     A `cd <dir>` earlier in the command (Codex's own `cd <dir> && apply_patch`
-    form included) moves the folder the patch applies in.
+    form included) moves the folder for every patch after it.
     """
-    start = command.find("*** Begin Patch")
-    if start < 0:
-        return "", cwd
-    folder = cwd
-    for m in CD_RX.finditer(command[:start]):
-        folder = absolute(m.group(1), folder)
-    offset = start
-    for line in command[start:].split("\n"):
-        offset += len(line) + 1
-        if line.strip() == "*** End Patch":
-            return command[start:offset - 1], folder
-    return command[start:], folder
+    found: List[Tuple[str, str]] = []
+    folder, done = cwd, 0
+    while True:
+        start = command.find("*** Begin Patch", done)
+        if start < 0:
+            return found
+        for m in CD_RX.finditer(command[done:start]):
+            folder = absolute(m.group(1), folder)
+        end = len(command)
+        offset = start
+        for line in command[start:].split("\n"):
+            offset += len(line) + 1
+            if line.strip() == "*** End Patch":
+                end = offset - 1
+                break
+        found.append((command[start:end], folder))
+        done = end
 
 
 # ---------------------------------------------------------------------------
@@ -510,9 +515,10 @@ def calls(tool: str, tool_input: dict, cwd: str) -> List[Call]:
             return [] if tool in ("apply_patch", "write_stdin") else [("Bash", tool_input, "")]
         if command.lstrip().startswith("*** Begin Patch"):
             return patch_calls(command, cwd)
-        body, folder = patch_in_shell(command, cwd)
-        return ([("Bash", {"command": command}, "")] + shell_write_calls(command, cwd)
-                + (patch_calls(body, folder) if body else []))
+        out = [("Bash", {"command": command}, "")] + shell_write_calls(command, cwd)
+        for body, folder in patches_in_shell(command, cwd):
+            out += patch_calls(body, folder)
+        return out
     if tool == "exec":
         code = _text(tool_input.get("code") or tool_input.get("input") or _command(tool_input))
         return code_mode_calls(code, cwd) or [(tool, tool_input, "")]

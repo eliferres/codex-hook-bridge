@@ -112,6 +112,13 @@ class ApplyPatch(unittest.TestCase):
         self.assertIn(("Write", "/work/app/sub/.env"), names(out))
         self.assertNotIn(("Write", "/work/app/.env"), names(out))
 
+    def test_every_patch_in_a_shell_command_is_read(self) -> None:
+        command = ("apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: a.txt\n+a\n*** End Patch\nEOF\n"
+                   "cd deep && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: .env\n+K=1\n*** End Patch\nEOF")
+        out = translate(codex("Bash", {"command": command}))
+        self.assertIn(("Write", "/work/app/a.txt"), names(out))
+        self.assertIn(("Write", "/work/app/deep/.env"), names(out))
+
     def test_every_payload_keeps_the_session_fields_and_names_the_codex_tool(self) -> None:
         for p in translate(codex("apply_patch", {"command": PATCH})):
             self.assertEqual(p["session_id"], "s1")

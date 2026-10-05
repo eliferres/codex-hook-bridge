@@ -180,12 +180,15 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 # body is not one: a parenthesis or backquote; a separator between commands
 # (&&, ||, a background &, a pipe |, ;, a newline); or a cd at the start of a
 # simple command, past its -L/-P options and `--`. A cd with no folder goes
-# home; one whose folder starts with a backquote runs a command for it.
+# home; one whose folder starts with a backquote runs a command for it. An
+# mkdir is read too, since a folder it makes exists for a cd after it.
 FOLDER_RX = re.compile(
     r"[()`]|(?P<sep>&&|\|\||(?<![>&|])&(?![>&])|(?<![>|])\||;|\n)"
     r"|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
     r"cd(?P<options>(?:[ \t]+-[LPe@]+)*)(?:[ \t]+--)?"
-    r"(?:[ \t]+(?P<target>'[^']*'|\"[^\"]*\"|`|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
+    r"(?:[ \t]+(?P<target>'[^']*'|\"[^\"]*\"|`|[^\s;&|()`]+)|(?=[ \t]*(?:$|[;&|)\n])))"
+    r"|(?:^|(?<=[;&|\n(`]))[ \t]*(?:(?:!|\{|do|then|else|elif|if|while|until)[ \t]+)*"
+    r"mkdir(?P<mkdir>[ \t][^;&|\n()`]*)", re.M)
 
 
 def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[str, ...]]:
@@ -208,8 +211,16 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
     levels = [{"now": here, "list": here, "element": here, "piped": False, "opened": ""}]
     offsets, values = [0], [here]
     seen = {cwd: None}   # every folder this command may have been in, for a cd whose folder is not known
+    made = set()         # folders an mkdir earlier in the command makes
     for m in FOLDER_RX.finditer(masked):
         token, level = m.group(), levels[-1]
+        if m.group("mkdir") is not None:
+            for name in mkdir_operands(_words(command[m.start("mkdir"):m.end("mkdir")])):
+                for path in (cd_folder(expand_home(name), f, False) for f in level["now"]):
+                    while path not in made and path != os.path.dirname(path):
+                        made.add(path)   # its parents exist too once it does (mkdir -p makes them)
+                        path = os.path.dirname(path)
+            continue
         if token == "(" or (token == "`" and level["opened"] != "`"):
             levels.append({"now": level["now"], "list": level["now"], "element": level["now"],
                            "piped": False, "opened": token})
@@ -244,7 +255,7 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], Tuple[s
             after = masked[m.end():m.end() + 64].lstrip(" \t")[:2]
             # `&&` holds the next command back when the cd fails; `;`, a newline and `||` let it run
             next_runs_anyway = after[:1] in (";", "\n") or after == "||"
-            may_fail = next_runs_anyway and not all(os.path.isdir(f) for f in moved)
+            may_fail = next_runs_anyway and not all(f in made or os.path.isdir(f) for f in moved)
             level["now"] = tuple(dict.fromkeys(moved + level["now"])) if may_fail else moved
         if len(levels[-1]["now"]) > FOLDERS_MAX:
             raise Untranslatable("this command's cds into folders that may not exist leave more than %d "
@@ -261,6 +272,19 @@ def cd_folder(target: str, folder: str, physical: bool) -> str:
     text. With -P it follows the links on disk first."""
     joined = os.path.join(folder, os.path.expanduser(target.strip().strip("'\"")))
     return os.path.realpath(joined) if physical else os.path.normpath(joined)
+
+
+def mkdir_operands(words: List[str]) -> List[str]:
+    """The folders an mkdir's arguments name, past its options and -m's mode."""
+    out, skip = [], False
+    for w in words:
+        if skip:
+            skip = False
+        elif w == "-m":
+            skip = True
+        elif not w.startswith("-"):
+            out.append(w)
+    return out
 
 
 def unknown_folder(target: str) -> bool:

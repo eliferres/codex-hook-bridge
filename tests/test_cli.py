@@ -250,5 +250,18 @@ class GuardedSession(unittest.TestCase):
         self.assertEqual(out[1]["tool_input"]["file_path"], os.path.join(self.root, "elsewhere", "k"))
 
 
+    def test_a_folder_made_earlier_in_the_command_is_entered_for_certain(self) -> None:
+        builds = "".join("mkdir -p d%d; cd d%d; make; cd ..; " % (n, n) for n in range(9))
+        self.assertEqual(self.exit_code(builds + "echo done"), 0)
+        script = "mkdir -p out; cd out; echo x > f; cd ..; echo y > g"
+        self.assertEqual(self.exit_code(script), 0)
+        out = translate({"tool_name": "Bash", "cwd": self.app, "tool_input": {"command": script}})
+        self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]],
+                         [os.path.join(self.app, "out", "f"), os.path.join(self.app, "g")])
+        made = translate({"tool_name": "Bash", "cwd": self.app,
+                          "tool_input": {"command": "mkdir -m 755 -p a/b; cd a; cd b; echo x > f"}})
+        self.assertEqual([p["tool_input"]["file_path"] for p in made[1:]], [os.path.join(self.app, "a", "b", "f")])
+
+
 if __name__ == "__main__":
     unittest.main()

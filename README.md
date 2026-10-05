@@ -272,7 +272,8 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   close, one in any command of a pipeline, and one in a list sent to the
   background with `&`. A `cd` into a folder that does not exist yet,
   followed by `;`, a newline or `||` rather than `&&`, may fail while the
-  next command still runs, so what follows is reported under both folders.
+  next command still runs, so what follows is reported under both folders;
+  a folder an `mkdir` earlier in the command makes counts as existing.
   A `cd` whose folder is only known when it runs (`cd "$PWD"`, `cd -`,
   `cd "$(git rev-parse --show-toplevel)"`) leaves every folder the command
   has been in, the session folder included, as a place it may be. As in

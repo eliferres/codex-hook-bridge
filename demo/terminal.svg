@@ -34,8 +34,8 @@
   <text x="24" y="492" class="cmd">    demo/settings.json; echo &quot;exit $?&quot;</text>
   <text x="24" y="520" class="dim">reached      PreToolUse [Bash]: python3 demo/hooks/no_publi…</text>
   <text x="24" y="548" class="dim">             via Bash</text>
-  <text x="24" y="576" class="dim">reached      PreToolUse [Write|Edit|MultiEdit]: python3 dem…</text>
-  <text x="24" y="604" class="dim">             via Write, Edit, MultiEdit</text>
+  <text x="24" y="576" class="dim">reached      PreToolUse [Write|Edit]: python3 demo/hooks/pr…</text>
+  <text x="24" y="604" class="dim">             via Write, Edit</text>
   <text x="24" y="632" class="dim">unreachable  PreToolUse [Grep]: python3 demo/hooks/search_l…</text>
   <text x="24" y="660" class="dim">             Codex searches through its shell, so a search…</text>
   <text x="24" y="688" class="dim">UNACCOUNTED  PreToolUse [Deploy]: python3 demo/hooks/deploy…</text>

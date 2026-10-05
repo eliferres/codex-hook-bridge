@@ -59,6 +59,7 @@ CLAUDE_ONLY_TOOLS: Dict[str, str] = {
     "Skill": "Codex reads skills as files; there is no skill tool call",
     "TodoWrite": "Codex keeps its plan with update_plan, which passes through under its own name",
     "Workflow": "Codex has no workflow tool",
+    "MultiEdit": "MultiEdit is no longer a Claude Code tool; each patch hunk arrives as an Edit",
 }
 
 # Hook sources Claude Code also runs that the bridge does not read.

@@ -16,7 +16,7 @@
   },
   {
     "cmd": "python3 -m codex_hook_bridge parity --settings demo/settings.json; echo \"exit $?\"",
-    "out": "reached      PreToolUse [Bash]: python3 demo/hooks/no_publish.py\n             via Bash\nreached      PreToolUse [Write|Edit|MultiEdit]: python3 demo/hooks/protect_env.py\n             via Write, Edit, MultiEdit\nunreachable  PreToolUse [Grep]: python3 demo/hooks/search_log.py\n             Codex searches through its shell, so a search reaches Bash hooks instead\nUNACCOUNTED  PreToolUse [Deploy]: python3 demo/hooks/deploy_window.py\n             matches no tool a Codex call is translated to\nunreachable  Notification: python3 demo/hooks/notify.py\n             Codex fires no notification event\n5 routes: 2 reached, 2 unreachable, 1 unaccounted (managed-policy and plugin hooks are not read)\nexit 1",
+    "out": "reached      PreToolUse [Bash]: python3 demo/hooks/no_publish.py\n             via Bash\nreached      PreToolUse [Write|Edit]: python3 demo/hooks/protect_env.py\n             via Write, Edit\nunreachable  PreToolUse [Grep]: python3 demo/hooks/search_log.py\n             Codex searches through its shell, so a search reaches Bash hooks instead\nUNACCOUNTED  PreToolUse [Deploy]: python3 demo/hooks/deploy_window.py\n             matches no tool a Codex call is translated to\nunreachable  Notification: python3 demo/hooks/notify.py\n             Codex fires no notification event\n5 routes: 2 reached, 2 unreachable, 1 unaccounted (managed-policy and plugin hooks are not read)\nexit 1",
     "status": 0
   }
 ]

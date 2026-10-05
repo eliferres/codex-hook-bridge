@@ -27,7 +27,11 @@ class Reach(unittest.TestCase):
     def test_tool_matchers_reached_by_a_translation_are_reached(self) -> None:
         self.assertEqual(status(route("PreToolUse", "Bash")), ("reached", "via Bash"))
         self.assertEqual(status(route("PreToolUse", "Write|Edit|MultiEdit")),
-                         ("reached", "via Write, Edit, MultiEdit"))
+                         ("reached", "via Write, Edit"))
+
+    def test_a_multiedit_only_route_is_unreachable_with_the_reason(self) -> None:
+        self.assertEqual(status(route("PreToolUse", "MultiEdit")),
+                         ("unreachable", "MultiEdit is no longer a Claude Code tool; each patch hunk arrives as an Edit"))
         self.assertEqual(status(route("PostToolUse", "")), ("reached", "every Codex tool call"))
 
     def test_mcp_matchers_are_reached_because_mcp_tools_keep_their_names(self) -> None:

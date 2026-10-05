@@ -1,7 +1,7 @@
 """Turn one Codex hook payload into the Claude Code tool payloads it amounts to.
 
 Claude Code hooks read a payload whose `tool_name` is one of Claude Code's own
-tools (Bash, Write, Edit, MultiEdit, Read, ...). Codex describes the same acts
+tools (Bash, Write, Edit, Read, ...). Codex describes the same acts
 in its own shapes: a shell call, an apply_patch body, a code-mode script, a
 subagent spawn. `translate()` returns the list of Claude-shaped payloads one
 Codex call performs, so every matching Claude Code hook can judge it.
@@ -26,7 +26,7 @@ from typing import Iterator, List, Optional, Tuple
 # Every Claude Code tool name a translation can produce. Parity uses this set
 # to decide whether a hook's matcher can ever be reached from Codex.
 CLAUDE_TOOLS = (
-    "Bash", "Write", "Edit", "MultiEdit", "Read", "WebSearch", "WebFetch",
+    "Bash", "Write", "Edit", "Read", "WebSearch", "WebFetch",
     "AskUserQuestion", "Agent", "SendMessage",
 )
 
@@ -110,12 +110,12 @@ def parse_patch(body: str) -> List[dict]:
 
 
 def patch_calls(body: str, cwd: str) -> List[Call]:
-    """The Claude Code calls an apply_patch body performs, one per file.
+    """The Claude Code calls an apply_patch body performs, file by file.
 
-    Add is a Write with the new content. Update is an Edit (one hunk) or a
-    MultiEdit (several). Delete is `rm` and a rename is `mv`, both as Bash,
-    because Claude Code has no delete or rename tool and its hooks see those
-    acts as shell commands.
+    Add is a Write with the new content. Update is one Edit per hunk, since
+    current Claude Code has no MultiEdit tool. Delete is `rm` and a rename is
+    `mv`, both as Bash, because Claude Code has no delete or rename tool and
+    its hooks see those acts as shell commands.
     """
     out: List[Call] = []
     for f in parse_patch(body):
@@ -130,12 +130,9 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
                 command = "mv -- %s %s" % (shell_quote(path), shell_quote(dest))
                 out.append(("Bash", {"command": command}, "patch-move"))
                 path = dest
-            edits = [{"old_string": o, "new_string": n} for o, n in f["hunks"]]
-            if len(edits) == 1:
-                out.append(("Edit", dict({"file_path": path}, **edits[0]), ""))
-            elif edits:
-                out.append(("MultiEdit", {"file_path": path, "edits": edits}, ""))
-            else:
+            for old, new in f["hunks"]:
+                out.append(("Edit", {"file_path": path, "old_string": old, "new_string": new}, ""))
+            if not f["hunks"]:
                 # a bare rename still writes the destination path
                 out.append(("Write", {"file_path": path, "content": ""}, "patch-empty"))
     return out
@@ -506,7 +503,7 @@ def connector_name(tool: str) -> str:
 
 def calls(tool: str, tool_input: dict, cwd: str) -> List[Call]:
     """The Claude Code calls one Codex tool call amounts to."""
-    if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit", "Read"):
+    if tool in ("Write", "Edit", "NotebookEdit", "Read"):
         return [(tool, tool_input, "")]
     if tool in ("Bash", "exec_command", "shell", "local_shell", "apply_patch", "write_stdin"):
         # write_stdin types into a running shell: its text is a command like any other

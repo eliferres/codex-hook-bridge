@@ -66,8 +66,6 @@ def summarize(payload: dict) -> str:
         detail = str(tool_input.get("command") or "")
     elif "file_path" in tool_input:
         detail = str(tool_input["file_path"])
-        if name == "MultiEdit":
-            detail += " (%d edits)" % len(tool_input.get("edits") or [])
     elif name == "WebSearch":
         detail = str(tool_input.get("query") or "")
     elif name == "WebFetch":

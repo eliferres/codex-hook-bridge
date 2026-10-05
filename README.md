@@ -74,7 +74,7 @@ event. Tool events are translated first; each row below is one translation.
 | Codex call | Claude Code payload(s) | Why |
 |---|---|---|
 | shell (`Bash`, `exec_command`, `shell`, `local_shell`) | `Bash` with the command, plus one `Write` per file the command writes | On Codex the shell is a file-writing tool too: `sed -i`, `>`, `tee`, `cp`, `curl -o` and the rest should meet the hooks that guard paths |
-| `apply_patch` | one `Write` per added file, `Edit` per updated file (`MultiEdit` for several hunks), `Bash` `rm` per deleted file, `Bash` `mv` per rename | A patch touches many files at once; Claude Code's file hooks judge one file per call |
+| `apply_patch` | one `Write` per added file, `Edit` per hunk of an updated file, `Bash` `rm` per deleted file, `Bash` `mv` per rename | A patch touches many files at once; Claude Code's file hooks judge one file per call |
 | code mode (`exec`) | the nested `tools.exec_command` and `tools.apply_patch` calls as above, plus a `Write` per `fs.writeFile` | The script's acts, not the script, are what a hook can judge |
 | `view_image` | `Read` | Same act, same path checks |
 | `web_search` | `WebSearch`, plus `WebFetch` per opened URL | Same act |
@@ -200,7 +200,9 @@ written; only files in the layout the bridge writes are touched.
 - **Claude Code tools with no Codex twin:** `Glob` and `Grep` (Codex searches
   through the shell, so those calls reach `Bash` hooks), `PowerShell`,
   `NotebookEdit` (notebook edits arrive as `apply_patch`), `ExitPlanMode`,
-  `Skill`, `TodoWrite` and `Workflow`. `parity` names each with its reason.
+  `Skill`, `TodoWrite` and `Workflow`. A matcher naming the retired
+  `MultiEdit` tool sees nothing either: each patch hunk arrives as an `Edit`.
+  `parity` names each with its reason.
 - **macOS and Linux only.** The bridge locks the transcript copy with `fcntl`
   and stops timed-out hooks by process group, neither of which exists on
   Windows, so it does not run there even though Codex hooks can.

@@ -53,12 +53,13 @@ class ApplyPatch(unittest.TestCase):
         write = translate(codex("apply_patch", {"command": PATCH}))[1]["tool_input"]
         self.assertEqual(write["content"], "TOKEN=abc\nDEBUG=1")
 
-    def test_two_hunks_in_one_file_are_a_multiedit(self) -> None:
+    def test_two_hunks_in_one_file_are_two_edits_because_multiedit_is_gone(self) -> None:
         body = ("*** Begin Patch\n*** Update File: a.py\n@@\n-a\n+b\n@@ def f():\n-c\n+d\n*** End Patch")
         out = translate(codex("apply_patch", {"command": body}))
-        self.assertEqual(out[0]["tool_name"], "MultiEdit")
-        self.assertEqual(out[0]["tool_input"]["edits"],
-                         [{"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": "d"}])
+        self.assertEqual([(p["tool_name"], p["tool_input"]) for p in out], [
+            ("Edit", {"file_path": "/work/app/a.py", "old_string": "a", "new_string": "b"}),
+            ("Edit", {"file_path": "/work/app/a.py", "old_string": "c", "new_string": "d"}),
+        ])
 
     def test_a_move_is_mv_then_the_edit_lands_on_the_new_path(self) -> None:
         body = "*** Begin Patch\n*** Update File: a.py\n*** Move to: b.py\n@@\n-x\n+y\n*** End Patch"

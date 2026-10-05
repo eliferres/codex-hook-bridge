@@ -263,5 +263,19 @@ class GuardedSession(unittest.TestCase):
         self.assertEqual([p["tool_input"]["file_path"] for p in made[1:]], [os.path.join(self.app, "a", "b", "f")])
 
 
+    def test_ordinary_commands_pass(self) -> None:
+        two_files = ("apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: src/a.py\n+a\n"
+                     "*** Add File: README.md\n+r\n*** End Patch\nEOF")
+        script = "\n".join(["set -e", "cd src", "echo a > a.txt", "ls -la", "cd ..", "git status",
+                            "cd src && make", "cd ..", "mkdir -p build", "cd build", "cmake ..", "cd ..",
+                            "for f in src/*.py; do python3 -m py_compile \"$f\"; done", "cd src",
+                            "sed -i.bak 's/a/b/' a.txt", "cd ..", "npm run lint | tee lint.log",
+                            "git diff --stat", "cd src; echo done > status.txt; cd ..", "echo ok"])
+        for command in ("npm test", "git status && git diff", "cd src && echo x > out.txt",
+                        "curl -s https://example.com/api | jq .", "tar -czf out.tgz src", two_files, script):
+            with self.subTest(command=command):
+                self.assertEqual(self.exit_code(command), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

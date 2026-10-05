@@ -21,8 +21,16 @@ def codex(tool: str, tool_input: object, **extra: object) -> dict:
 
 
 def names(payloads: list) -> list:
+    """(tool, path or command) of each payload as written. The real-path copy
+    sent when a symlinked folder is on the way (macOS /tmp and /var included)
+    is left out here and tested on its own."""
     return [(p["tool_name"], p["tool_input"].get("file_path") or p["tool_input"].get("command"))
-            for p in payloads]
+            for p in payloads if p.get("codex_derived") != "real-path"]
+
+
+def written_paths(payloads: list) -> list:
+    """The file paths of the payloads after the Bash one, as written."""
+    return [path for tool, path in names(payloads)[1:]]
 
 
 PATCH = """*** Begin Patch
@@ -107,6 +115,23 @@ class ApplyPatch(unittest.TestCase):
             body = "*** Begin Patch\n*** Add File: link/../k\n+x\n*** End Patch"
             out = translate(codex("apply_patch", {"command": body}, cwd=os.path.join(tmp, "app")))
             self.assertEqual(names(out), [("Write", os.path.join(tmp, "secret", "k"))])
+
+    def test_a_path_through_a_symlink_is_sent_as_written_and_as_its_real_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = os.path.realpath(tmp)
+            os.makedirs(os.path.join(tmp, "secret", "sub"))
+            os.makedirs(os.path.join(tmp, "app"))
+            os.symlink(os.path.join(tmp, "secret", "sub"), os.path.join(tmp, "app", "link"))
+            body = "*** Begin Patch\n*** Add File: link/k\n+x\n*** End Patch"
+            out = translate(codex("apply_patch", {"command": body}, cwd=os.path.join(tmp, "app")))
+            self.assertEqual([(p["tool_name"], p["tool_input"]["file_path"]) for p in out],
+                             [("Write", os.path.join(tmp, "app", "link", "k")),
+                              ("Write", os.path.join(tmp, "secret", "sub", "k"))])
+            self.assertEqual(out[1]["codex_derived"], "real-path")
+            self.assertEqual(out[0]["tool_input"]["content"], out[1]["tool_input"]["content"])
+
+    def test_a_path_with_no_symlink_in_the_way_is_sent_once(self) -> None:
+        self.assertEqual(len(translate(codex("Bash", {"command": "echo x > /work/app/a.txt"}))), 2)
 
     def test_dot_dot_with_no_symlink_in_the_way_keeps_the_path_as_written(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:   # on macOS tmp itself sits behind /var -> /private/var
@@ -195,7 +220,7 @@ class ShellWrites(unittest.TestCase):
             with self.subTest(workdir=workdir):
                 out = translate(codex("local_shell", {"action": {"type": "exec", "working_directory": workdir,
                                                                  "command": ["bash", "-lc", "echo x > .env"]}}))
-                self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], [expected])
+                self.assertEqual(written_paths(out), [expected])
 
     def test_a_redirect_is_also_a_write_to_its_target(self) -> None:
         out = translate(codex("Bash", {"command": "echo hi > notes.md"}))
@@ -246,32 +271,32 @@ class ShellWrites(unittest.TestCase):
         for command, expected in cases.items():
             with self.subTest(command=command):
                 out = translate(codex("Bash", {"command": command}))
-                self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], expected)
+                self.assertEqual(written_paths(out), expected)
 
     def test_a_cd_that_may_fail_reports_both_folders_unless_and_and_follows(self) -> None:
         patch = "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: k\n+x\n*** End Patch\nEOF"
         for sep in (" ; ", "\n"):
             with self.subTest(sep=sep):
                 out = translate(codex("Bash", {"command": "cd /nowhere" + sep + "echo x > f.txt" + sep + patch}))
-                self.assertEqual(sorted(p["tool_input"]["file_path"] for p in out[1:]),
+                self.assertEqual(sorted(written_paths(out)),
                                  ["/nowhere/f.txt", "/nowhere/k", "/work/app/f.txt", "/work/app/k"])
         for sep in (" || ", " & "):
             with self.subTest(sep=sep):
                 out = translate(codex("Bash", {"command": "cd /nowhere" + sep + "echo x > f.txt"}))
-                self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]],
+                self.assertEqual(written_paths(out),
                                  ["/nowhere/f.txt", "/work/app/f.txt"])
         # after && the next command runs only if the cd worked, and a folder that exists is entered
         out = translate(codex("Bash", {"command": "cd /nowhere && echo x > f.txt"}))
-        self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], ["/nowhere/f.txt"])
+        self.assertEqual(written_paths(out), ["/nowhere/f.txt"])
         with tempfile.TemporaryDirectory() as tmp:
             out = translate(codex("Bash", {"command": "cd %s ; echo x > f.txt" % tmp}))
-            self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], [os.path.join(tmp, "f.txt")])
+            self.assertEqual(written_paths(out), [os.path.join(tmp, "f.txt")])
 
     def test_a_cd_inside_a_substitution_leaves_the_rest_of_the_command_where_it_was(self) -> None:
         for inner in ("$(cd /x && pwd)", "`cd /x && pwd`", '"$(cd /x)"', "`cd /x`"):
             with self.subTest(inner=inner):
                 out = translate(codex("Bash", {"command": "d=%s && echo y > f.txt" % inner}))
-                self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], ["/work/app/f.txt"])
+                self.assertEqual(written_paths(out), ["/work/app/f.txt"])
 
     def test_a_cd_to_home_is_expanded_however_it_is_spelled(self) -> None:
         patch = " && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: p.env\n+K=1\n*** End Patch\nEOF"
@@ -280,7 +305,7 @@ class ShellWrites(unittest.TestCase):
                        "cd -P $HOME/proj", "cd -- $HOME/proj"):
                 with self.subTest(cd=cd):
                     out = translate(codex("Bash", {"command": cd + " && echo x > .env" + patch}))
-                    self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]],
+                    self.assertEqual(written_paths(out),
                                      ["/home/u/proj/.env", "/home/u/proj/p.env"])
 
     def test_more_writers_and_shell_forms_are_read(self) -> None:

@@ -942,7 +942,22 @@ def translate(payload: dict) -> List[dict]:
         if tag:
             p["codex_derived"] = tag
         out.append(p)
+        real = real_path(str(translated_input.get("file_path") or ""))
+        if real:
+            out.append(dict(p, tool_input=dict(translated_input, file_path=real), codex_derived="real-path"))
     return out
+
+
+def real_path(path: str) -> str:
+    """Where `path` really lands when a symlinked folder is on its way there,
+    or "" when that is the path itself. Both are sent: the real one so a guard
+    on the link's target sees the write, the written one so a guard on the
+    path as written (`/etc/` where /etc is a symlink, as on macOS) still does."""
+    if not os.path.isabs(path):
+        return ""   # a placeholder such as <unresolved path in script>
+    head, tail = os.path.split(path)
+    real = os.path.realpath(head)
+    return os.path.join(real, tail) if real != head else ""
 
 
 # ---------------------------------------------------------------------------

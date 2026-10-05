@@ -108,6 +108,35 @@ class CommandLine(unittest.TestCase):
         self.assertIn("characters long", proc.stderr)
         self.assertNotIn("internal error", proc.stderr)
 
+    def guard_on(self, prefix: str) -> str:
+        """A settings file whose Write|Edit guard refuses any path under `prefix`."""
+        guard = os.path.join(self.tmp.name, "guard.py")
+        with open(guard, "w") as fh:
+            fh.write("import json, sys\npath = json.load(sys.stdin)['tool_input'].get('file_path', '')\n"
+                     "sys.exit(2 if path.startswith(%r) else 0)\n" % prefix)
+        settings = os.path.join(self.tmp.name, "guarded.json")
+        with open(settings, "w") as fh:
+            json.dump({"hooks": {"PreToolUse": [{"matcher": "Write|Edit", "hooks": [
+                {"type": "command", "command": '"%s" "%s"' % (sys.executable, guard)}]}]}}, fh)
+        return settings
+
+    def test_a_write_through_a_symlinked_folder_meets_a_guard_on_the_real_folder(self) -> None:
+        root = os.path.realpath(self.tmp.name)
+        os.makedirs(os.path.join(root, "secret", "sub"))
+        os.makedirs(os.path.join(root, "app"))
+        os.symlink(os.path.join(root, "secret", "sub"), os.path.join(root, "app", "link"))
+        payload = {"hook_event_name": "PreToolUse", "cwd": os.path.join(root, "app"), "tool_name": "apply_patch",
+                   "tool_input": {"command": "*** Begin Patch\n*** Add File: link/k\n+x\n*** End Patch"}}
+        proc = cli(["hook", "--settings", self.guard_on(os.path.join(root, "secret") + "/")], json.dumps(payload))
+        self.assertEqual(proc.returncode, 2)
+
+    def test_a_guard_on_the_written_path_still_matches_when_a_system_folder_is_a_symlink(self) -> None:
+        # on macOS /etc is a symlink to /private/etc; the written path must still be sent
+        payload = {"hook_event_name": "PreToolUse", "cwd": self.tmp.name, "tool_name": "Bash",
+                   "tool_input": {"command": "echo x > /etc/hosts"}}
+        proc = cli(["hook", "--settings", self.guard_on("/etc/")], json.dumps(payload))
+        self.assertEqual(proc.returncode, 2)
+
     def test_odd_tool_inputs_never_produce_a_traceback(self) -> None:
         for tool_input in ({"open": ["https://example.com"]}, {"search_query": "plain"}):
             payload = {"hook_event_name": "PreToolUse", "tool_name": "web_search", "tool_input": tool_input}

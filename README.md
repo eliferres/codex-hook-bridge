@@ -89,6 +89,13 @@ Each translated payload keeps the Codex payload's other fields and adds
 `codex_tool_name` (the Codex name) and, on derived payloads such as a shell
 write, `codex_derived`.
 
+When a symlinked folder lies on a file's path, its payload is sent twice:
+once with the path as written and once with the real path, tagged
+`codex_derived: "real-path"`. A guard on the link's target sees the write,
+and a guard on the path as written still does too, even where a system
+folder is itself a symlink (`/etc`, `/tmp` and `/var` on macOS), so hooks
+there see each file payload twice.
+
 ## Commands, exit codes, configuration
 
 ```text

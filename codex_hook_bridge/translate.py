@@ -65,6 +65,13 @@ def absolute(path: str, cwd: str) -> str:
     return os.path.join(real, tail) if tail else real
 
 
+def expand_home(word: str) -> str:
+    """`word` with $HOME and ${HOME} replaced by the home folder, as the shell
+    expands them; a leading ~ is left for absolute() to expand."""
+    home = os.path.expanduser("~")
+    return word.replace("${HOME}", home).replace("$HOME", home)
+
+
 def shell_quote(text: str) -> str:
     """Single-quote `text` for a POSIX shell, independent of what it contains."""
     return "'" + str(text).replace("'", "'\\''") + "'"
@@ -155,9 +162,11 @@ def patch_calls(body: str, cwd: str) -> List[Call]:
 
 
 # On the masked command (see mask()), so a `cd` inside quotes or a heredoc
-# body is not one: a parenthesis, or a cd at the start of a simple command.
+# body is not one: a parenthesis, or a cd at the start of a simple command,
+# past its -L/-P options and `--`. A cd with no folder goes home.
 FOLDER_RX = re.compile(
-    r"[()]|(?:^|(?<=[;&|\n(]))[ \t]*cd[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()]+)", re.M)
+    r"[()]|(?:^|(?<=[;&|\n(]))[ \t]*cd(?:[ \t]+-[LPe@]+)*(?:[ \t]+--)?"
+    r"(?:[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()]+)|(?=[ \t]*(?:$|[;&|)\n])))", re.M)
 
 
 def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], str]:
@@ -174,8 +183,10 @@ def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], str]:
         elif m.group() == ")":
             if len(stack) > 1:   # an unmatched `)` (a case pattern) closes nothing
                 stack.pop()
-        else:
-            stack[-1] = absolute(command[m.start(1):m.end(1)], stack[-1])
+        elif m.group(1) is None:
+            stack[-1] = os.path.expanduser("~")
+        elif command[m.start(1):m.end(1)] != "-":   # `cd -`: the previous folder, not known here
+            stack[-1] = absolute(expand_home(command[m.start(1):m.end(1)]), stack[-1])
         offsets.append(m.end())
         values.append(stack[-1])
     return lambda offset: values[bisect.bisect_right(offsets, offset) - 1]
@@ -395,7 +406,7 @@ def _resolve(name: str, folder: str) -> str:
     """A written file's absolute path, or "" for a target that is not a file (/dev/*, &2)."""
     if not name or name.startswith(("/dev/", "&")):
         return ""
-    return absolute(name.replace("${HOME}", "~").replace("$HOME", "~"), folder)
+    return absolute(expand_home(name), folder)
 
 
 def shell_targets(command: str, cwd: str) -> List[str]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from codex_hook_bridge.translate import matcher_fits, shell_targets, translate
 
@@ -223,6 +224,16 @@ class ShellWrites(unittest.TestCase):
             with self.subTest(command=command):
                 out = translate(codex("Bash", {"command": command}))
                 self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], expected)
+
+    def test_a_cd_to_home_is_expanded_however_it_is_spelled(self) -> None:
+        patch = " && apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: p.env\n+K=1\n*** End Patch\nEOF"
+        with mock.patch.dict(os.environ, {"HOME": "/home/u"}):
+            for cd in ("cd $HOME/proj", "cd ${HOME}/proj", 'cd "$HOME/proj"', "cd ~/proj", "cd && cd proj",
+                       "cd -P $HOME/proj", "cd -- $HOME/proj"):
+                with self.subTest(cd=cd):
+                    out = translate(codex("Bash", {"command": cd + " && echo x > .env" + patch}))
+                    self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]],
+                                     ["/home/u/proj/.env", "/home/u/proj/p.env"])
 
     def test_a_heredoc_write_carries_its_body(self) -> None:
         out = translate(codex("Bash", {"command": "cat > a.txt <<'EOF'\nhello\nEOF"}))

@@ -150,6 +150,12 @@ class ApplyPatch(unittest.TestCase):
         self.assertIn(("Write", "/work/app/a.txt"), names(out))
         self.assertIn(("Write", "/work/app/deep/.env"), names(out))
 
+    def test_a_patch_under_a_key_not_read_passes_through_so_match_all_hooks_see_it(self) -> None:
+        for key in ("input", "patch"):
+            with self.subTest(key=key):
+                out = translate(codex("apply_patch", {key: PATCH}))
+                self.assertEqual([(p["tool_name"], p["tool_input"]) for p in out], [("apply_patch", {key: PATCH})])
+
     def test_every_payload_keeps_the_session_fields_and_names_the_codex_tool(self) -> None:
         for p in translate(codex("apply_patch", {"command": PATCH})):
             self.assertEqual(p["session_id"], "s1")

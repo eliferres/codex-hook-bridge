@@ -605,7 +605,11 @@ def calls(tool: str, tool_input: dict, cwd: str) -> List[Call]:
         # write_stdin types into a running shell: its text is a command like any other
         command = _text(tool_input.get("chars")) if tool == "write_stdin" else _command(tool_input)
         if not command:
-            return [] if tool in ("apply_patch", "write_stdin") else [("Bash", tool_input, "")]
+            if tool == "write_stdin":
+                return []   # nothing typed
+            # a patch under a key not read here passes through as itself, so a
+            # hook matching every tool still judges it
+            return [(tool if tool == "apply_patch" else "Bash", tool_input, "")]
         if command.lstrip().startswith("*** Begin Patch"):
             return patch_calls(command, cwd)
         out = [("Bash", {"command": command}, "")] + shell_write_calls(command, cwd)

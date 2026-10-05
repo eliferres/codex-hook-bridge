@@ -90,8 +90,10 @@ Each translated payload keeps the Codex payload's other fields and adds
 write, `codex_derived`.
 
 When a symlinked folder lies on a file's path, its payload is sent twice:
-once with the path as written and once with the real path, tagged
-`codex_derived: "real-path"`. A guard on the link's target sees the write,
+once with the path as written, made absolute and tidied, and once with the
+real path, tagged `codex_derived: "real-path"`. A `..` right after a
+symlink is the exception: it climbs out of the link's target, so that path
+is resolved to the folder it really reaches and sent once. A guard on the link's target sees the write,
 and a guard on the path as written still does too, even where a system
 folder is itself a symlink (`/etc`, `/tmp` and `/var` on macOS), so hooks
 there see each file payload twice.

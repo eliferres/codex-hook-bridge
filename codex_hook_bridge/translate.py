@@ -599,7 +599,12 @@ def _written(prog: str, words: List[str]) -> List[str]:
     if prog == "dd":
         return [w[3:] for w in words[1:] if w.startswith("of=")]
     if prog in OUTPUT_OPTIONS:
-        return option_values(words, *OUTPUT_OPTIONS[prog])
+        values = option_values(words, *OUTPUT_OPTIONS[prog])
+        if prog in ("tar", "unzip"):
+            # a folder the archive's files land in: with and without the slash,
+            # so a guard written either way (`secret`, `secret/`) matches
+            return [v for folder in values for v in (folder.rstrip("/") or "/", folder.rstrip("/") + "/")]
+        return values
     if prog == "git" and len(words) > 2 and words[1] == "checkout" and "--" in words:
         return words[words.index("--") + 1:]
     return []
@@ -609,7 +614,8 @@ def _resolve(name: str, folder: str) -> str:
     """A written file's absolute path, or "" for a target that is not a file (/dev/*, &2, - for stdout)."""
     if not name or name == "-" or name.startswith(("/dev/", "&")):
         return ""
-    return absolute(expand_home(name), folder)
+    path = absolute(expand_home(name), folder)
+    return path + "/" if name.endswith("/") and not path.endswith("/") else path   # a folder stays one
 
 
 def shell_targets(command: str, cwd: str, depth: int = 0) -> List[Tuple[str, str]]:

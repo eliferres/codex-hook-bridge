@@ -251,7 +251,8 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
   It knows redirects and the common writers (`cp`, `mv`, `tee`, `sed -i`,
   `perl -i`, `dd`, `curl -o`, `wget -O`, `tar -C`, `unzip -d`,
   `git checkout --`, `git restore` and more), in clustered spellings such as
-  `curl -sSo`, behind wrappers and keywords (`sudo`, `stdbuf`, `do`, `!`), and
+  `curl -sSo` (the folder of `tar -C` and `unzip -d` is reported with and
+  without a trailing slash), behind wrappers and keywords (`sudo`, `stdbuf`, `do`, `!`), and
   inside `bash -c`, `eval` and `$( ... )`; a write done by a script the
   command runs is invisible to it.
 - **Relative shell writes resolve against the session folder.** Codex's

@@ -272,8 +272,8 @@ class ShellWrites(unittest.TestCase):
             "echo `cp a backquote.txt`": [("Write", "backquote.txt")],
             "stdbuf -oL cp a stdbuf.txt": [("Write", "stdbuf.txt")],
             "stdbuf -o L tee stdbuf2.txt": [("Write", "stdbuf2.txt")],
-            "git restore .env": [("Edit", ".env")],
-            "git restore --source HEAD~1 -- a.py": [("Edit", "a.py")],
+            "git restore .env": [("Write", ".env"), ("Edit", ".env")],
+            "git restore --source HEAD~1 -- a.py": [("Write", "a.py"), ("Edit", "a.py")],
             "for d in a; do cd /secret; done; echo x > .env": [("Write", "/secret/.env")],
         }
         for command, expected in cases.items():
@@ -282,10 +282,11 @@ class ShellWrites(unittest.TestCase):
                 self.assertEqual([(p["tool_name"], p["tool_input"]["file_path"]) for p in out[1:]],
                                  [(tool, os.path.join(CWD, path)) for tool, path in expected])
 
-    def test_a_restore_is_an_edit_whose_content_is_not_known(self) -> None:
+    def test_a_restore_reaches_write_and_edit_hooks_with_no_content_known(self) -> None:
         out = translate(codex("Bash", {"command": "git restore .env"}))
-        self.assertEqual(out[1]["tool_input"], {"file_path": "/work/app/.env", "old_string": "", "new_string": ""})
-        self.assertEqual(out[1]["codex_derived"], "shell-edit")
+        self.assertEqual([(p["tool_name"], p["codex_derived"]) for p in out[1:]],
+                         [("Write", "shell-write"), ("Edit", "shell-edit")])
+        self.assertEqual(out[2]["tool_input"], {"file_path": "/work/app/.env", "old_string": "", "new_string": ""})
 
     def test_commands_nested_past_any_real_use_are_refused_not_passed(self) -> None:
         with self.assertRaises(Untranslatable):

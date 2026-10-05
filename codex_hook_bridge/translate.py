@@ -560,7 +560,8 @@ def segment_targets(words: List[str], folder: str, depth: int = 0) -> List[Tuple
     if prog == "eval":
         return shell_targets(" ".join(words[1:]), folder, depth + 1)
     if prog == "git" and len(words) > 2 and words[1] == "restore":
-        return [("Edit", p) for p in restored_paths(words)]
+        # both, so a guard on either tool sees a restore; it rewrites the file like a Write
+        return [(tool, p) for p in restored_paths(words) for tool in ("Write", "Edit")]
     return [("Write", p) for p in _written(prog, words)]
 
 

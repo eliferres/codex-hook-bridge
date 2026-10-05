@@ -235,8 +235,9 @@ ever deleted, so other files in a shared `--state-dir` are left alone.
 - **Relative shell writes resolve against the session folder.** Codex's
   `exec_command` hook payload carries no `workdir`, so a command run in a
   subfolder that writes `notes.txt` is reported as the session folder's
-  `notes.txt`. A `cd <dir>` inside the command itself is followed for
-  patches.
+  `notes.txt`. A `cd <dir>` inside the command itself is followed, for
+  patches and shell writes alike; a `cd` inside a subshell holds only until
+  the subshell's closing parenthesis.
 - **Codex reaches only what it hooks.** Codex's documentation says hosted
   tools such as its built-in web search do not pass through hooks, so the
   `web_search` translation applies only where Codex does send the call.

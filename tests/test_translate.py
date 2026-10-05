@@ -156,6 +156,11 @@ class ApplyPatch(unittest.TestCase):
             self.assertEqual(p["codex_tool_name"], "apply_patch")
 
 
+def targets(command: str) -> list:
+    """The files a command writes, relative to CWD when under it."""
+    return [p[len(CWD) + 1:] if p.startswith(CWD + "/") else p for p in shell_targets(command, CWD)]
+
+
 class ShellWrites(unittest.TestCase):
     def test_a_plain_command_is_one_bash_payload(self) -> None:
         out = translate(codex("Bash", {"command": "ls -la"}))
@@ -174,8 +179,8 @@ class ShellWrites(unittest.TestCase):
         self.assertEqual(out[1]["codex_derived"], "shell-write")
 
     def test_a_redirect_inside_quotes_or_a_heredoc_body_is_not_a_write(self) -> None:
-        self.assertEqual(shell_targets('git commit -m "a > b"'), [])
-        self.assertEqual(shell_targets("python3 - <<'EOF'\nprint(1 > 0)\nEOF"), [])
+        self.assertEqual(targets('git commit -m "a > b"'), [])
+        self.assertEqual(targets("python3 - <<'EOF'\nprint(1 > 0)\nEOF"), [])
 
     def test_known_writers_name_their_targets(self) -> None:
         cases = {
@@ -192,7 +197,7 @@ class ShellWrites(unittest.TestCase):
             "timeout -s KILL 10 tee t.txt": ["t.txt"],
             "env -u HOME X=1 cp a envd.txt": ["envd.txt"],
             "sudo -u root nice -n 5 tee nested.txt": ["nested.txt"],
-            "(cd sub && echo x > paren.txt)": ["paren.txt"],
+            "(cd sub && echo x > paren.txt)": ["sub/paren.txt"],
             "(sed -i s/a/b/ sub.txt)": ["sub.txt"],
             "tee -a log.txt": ["log.txt"],
             "curl -o page.html https://example.com": ["page.html"],
@@ -205,7 +210,19 @@ class ShellWrites(unittest.TestCase):
         }
         for command, expected in cases.items():
             with self.subTest(command=command):
-                self.assertEqual(shell_targets(command), expected)
+                self.assertEqual(targets(command), expected)
+
+    def test_a_cd_moves_where_a_shell_write_lands(self) -> None:
+        cases = {
+            "cd /secret && echo x > .env": ["/secret/.env"],
+            "cd sub; cp a.txt b.txt": ["/work/app/sub/b.txt"],
+            "bash -c 'cd /secret && tee .env'": ["/secret/.env"],
+            "(cd sub && echo x > p.txt); echo y > q.txt": ["/work/app/sub/p.txt", "/work/app/q.txt"],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                out = translate(codex("Bash", {"command": command}))
+                self.assertEqual([p["tool_input"]["file_path"] for p in out[1:]], expected)
 
     def test_a_heredoc_write_carries_its_body(self) -> None:
         out = translate(codex("Bash", {"command": "cat > a.txt <<'EOF'\nhello\nEOF"}))

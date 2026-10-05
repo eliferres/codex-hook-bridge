@@ -160,13 +160,13 @@ FOLDER_RX = re.compile(
     r"[()]|(?:^|(?<=[;&|\n(]))[ \t]*cd[ \t]+('[^']*'|\"[^\"]*\"|[^\s;&|()]+)", re.M)
 
 
-def folders(command: str, cwd: str) -> Callable[[int], str]:
+def folders(command: str, cwd: str, masked: str = "") -> Callable[[int], str]:
     """A function giving the folder the shell is in at each offset of `command`.
 
     Every `cd` moves it; a cd inside a subshell, `( ... )`, holds only until
     the subshell's closing parenthesis.
     """
-    masked = mask(command)
+    masked = masked or mask(command)
     stack, offsets, values = [cwd], [0], [cwd]
     for m in FOLDER_RX.finditer(masked):
         if m.group() == "(":
@@ -260,9 +260,10 @@ def _words(text: str) -> List[str]:
         return text.split()
 
 
-def _segments(command: str) -> Iterator[List[str]]:
-    """The words of each simple command in the line, split where the masked text has ; & | or a newline."""
-    masked = mask(command)
+def _segments(command: str, masked: str = "") -> Iterator[Tuple[List[str], int]]:
+    """(words, offset) of each simple command in the line, split where the
+    masked text has ; & | or a newline."""
+    masked = masked or mask(command)
     cuts = [0] + [m.end() for m in SEGMENT_RX.finditer(masked)] + [len(command)]
     for i in range(len(cuts) - 1):
         words = _words(command[cuts[i]:cuts[i + 1]].rstrip(";&|\n"))
@@ -272,12 +273,13 @@ def _segments(command: str) -> Iterator[List[str]]:
         while words and "=" in words[0] and words[0].split("=")[0].isidentifier():
             words = words[1:]   # leading VAR=value assignments
         if words:
-            yield words
+            yield words, cuts[i]
 
 
-def redirect_targets(command: str) -> List[str]:
-    """Files named after >, >>, >|, 2>, &> outside quotes and heredoc bodies."""
-    masked = mask(command)
+def redirect_targets(command: str, masked: str = "") -> List[Tuple[str, int]]:
+    """(file, offset) for each file named after >, >>, >|, 2>, &> outside
+    quotes and heredoc bodies."""
+    masked = masked or mask(command)
     found = []
     for m in REDIRECT_OP_RX.finditer(masked):
         rest = command[m.end():].lstrip()
@@ -285,7 +287,7 @@ def redirect_targets(command: str) -> List[str]:
             continue   # >&2, a descriptor duplication, or part of <<
         first_line = rest[:rest.find("\n")] if "\n" in rest else rest
         word = (_words(first_line) or [""])[0]
-        found.append(re.split(r"[;&|)]", word)[0])   # `> f; ls`, `(... > f)`: not part of the name
+        found.append((re.split(r"[;&|)]", word)[0], m.start()))   # `> f; ls`, `(... > f)`: not part of the name
     return found
 
 
@@ -341,8 +343,9 @@ def unwrap(words: List[str]) -> List[str]:
     return words
 
 
-def segment_targets(words: List[str]) -> List[str]:
-    """The files one simple command writes, by what its program is known to write."""
+def segment_targets(words: List[str], folder: str) -> List[str]:
+    """The files one simple command run in `folder` writes, by what its
+    program is known to write, as written in the command."""
     words = unwrap(words)
     if not words:
         return []
@@ -352,7 +355,7 @@ def segment_targets(words: List[str]) -> List[str]:
         flag = next((i for i, w in enumerate(words[1:-1], 1)
                      if w.startswith("-") and not w.startswith("--") and "c" in w[1:]), None)
         if flag is not None:
-            return shell_targets(words[flag + 1])
+            return shell_targets(words[flag + 1], folder)   # absolute already, so they resolve to themselves
     operands = [w for w in words[1:] if not w.startswith("-")]
     if prog in INPLACE_PROGS:
         return inplace_files(words)
@@ -388,13 +391,22 @@ def segment_targets(words: List[str]) -> List[str]:
     return []
 
 
-def shell_targets(command: str) -> List[str]:
-    """Every path a shell command writes, in first-seen order. /dev/* is not a file."""
-    found = redirect_targets(command)
-    for words in _segments(command):
-        found += segment_targets(words)
-    found = [p.replace("${HOME}", "~").replace("$HOME", "~") for p in found]
-    return [p for p in dict.fromkeys(found) if p and not p.startswith(("/dev/", "&"))]
+def _resolve(name: str, folder: str) -> str:
+    """A written file's absolute path, or "" for a target that is not a file (/dev/*, &2)."""
+    if not name or name.startswith(("/dev/", "&")):
+        return ""
+    return absolute(name.replace("${HOME}", "~").replace("$HOME", "~"), folder)
+
+
+def shell_targets(command: str, cwd: str) -> List[str]:
+    """Every file a shell command writes, as absolute paths in first-seen
+    order, each resolved in the folder its own part of the command runs in."""
+    masked = mask(command)
+    where = folders(command, cwd, masked)
+    found = [_resolve(name, where(offset)) for name, offset in redirect_targets(command, masked)]
+    for words, offset in _segments(command, masked):
+        found += [_resolve(name, where(offset)) for name in segment_targets(words, where(offset))]
+    return [p for p in dict.fromkeys(found) if p]
 
 
 def _read_small(path: str) -> str:
@@ -415,23 +427,23 @@ def shell_write_calls(command: str, cwd: str) -> List[Call]:
     best available approximation. A hook that judges the path alone gets the
     path exactly; a hook that judges content gets the closest text there is.
     """
-    targets = shell_targets(command)
+    targets = shell_targets(command, cwd)
     if not targets:
         return []
-    bodies = [m.group(3) for m in HEREDOC_RX.finditer(command)]
+    bodies = [command[start:end] for _, start, end in heredocs(command)]
     if not bodies:
-        for words in _segments(command):
+        where = folders(command, cwd)
+        for words, offset in _segments(command):
             if os.path.basename(words[0]) in ("cp", "cat", "install", "ditto"):
                 operands = [w for w in words[1:] if not w.startswith("-")]
                 sources = operands[:-1] or operands
-                bodies += [t for t in (_read_small(absolute(o, cwd)) for o in sources) if t]
+                bodies += [t for t in (_read_small(absolute(o, where(offset))) for o in sources) if t]
     if not bodies:
         quoted = [a or b for a, b in QUOTED_RX.findall(command)]
         if quoted:
             bodies = ["\n".join(quoted).replace("\\n", "\n")]
     content = "\n".join(bodies)
-    return [("Write", {"file_path": absolute(p, cwd), "content": content}, "shell-write")
-            for p in targets]
+    return [("Write", {"file_path": p, "content": content}, "shell-write") for p in targets]
 
 
 # ---------------------------------------------------------------------------

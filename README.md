@@ -3,11 +3,13 @@
 Run the hooks you already wrote for Claude Code under OpenAI's Codex CLI, without rewriting them.
 
 [![ci](https://github.com/eliferres/codex-hook-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/eliferres/codex-hook-bridge/actions/workflows/ci.yml)
-![license](https://img.shields.io/badge/license-MIT-blue.svg)
-![python](https://img.shields.io/badge/python-3.9%2B-blue.svg)
-![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
+![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+![dependencies: none](https://img.shields.io/badge/dependencies-none-brightgreen.svg)
 
 <img src="demo/terminal.svg" width="660" alt="Terminal session showing codex-hook-bridge splitting a Codex patch into one Edit and one Write, refusing that patch because a Claude Code hook denies the .env write, refusing a publish command through an exit-2 hook, and ending on a parity report of five routes with one unaccounted, exit 1.">
+
+The [fde-agent-skills](https://github.com/eliferres/fde-agent-skills) library documents the working methods behind this tool and its sibling tools as agent skills.
 
 ## What it does
 
